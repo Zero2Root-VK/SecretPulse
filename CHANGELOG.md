@@ -1,5 +1,22 @@
 # Changelog
 
+## v5.2.0 (2026-11-14)
+### New Features
+- **Unified findings model** — secrets, CORS, redirects, JWT, dependency confusion, cloud permissions, takeover indicators, headers, and recon leads share one status model: `confirmed`, `potential`, or `lead`
+- **CI severity gate** — `--fail-on {critical,high,medium,low,any}` fails only on confirmed/potential findings
+- **Local and history scanning** — `--path` for files/directories, `--git` for native git history, `--gitleaks-config` for TOML rule import including rule/global allowlists
+- **Baseline-aware gating** — `--baseline` now suppresses pre-existing findings from the exit gate
+- **Complete persistence** — all unified findings and URL content hashes are stored per scan, so `--diff` reports real changes
+
+### Security and Accuracy Fixes
+- Removed S3 write/delete probe; cloud permission checks are read-only
+- Corrected CORS wildcard+credentials and client-side open-redirect status claims
+- Cloud-native regex indicators and subdomain takeover signatures are now leads, not confirmed findings
+- Fixed false-positive path matching that dropped findings under directories containing `test/`
+- Fixed smart-mode JWT/dependency/cloud modules being enabled by the planner but never run
+- Fixed generated GitHub Actions/GitLab CI filenames, YAML, and missing `--fail-on`
+- SARIF now maps leads to `note` and potential findings to `warning`
+
 ## v5.1.2 (2026-02-16)
 ### New Features
 - **WAF oscillation fix** — 90-second cooldown prevents stealth↔resume bouncing

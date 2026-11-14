@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SecretPulse v5.1.2
+SecretPulse v5.2.0
 ════════════════════════════════════════════
 High-Signal Secret & API Exposure Scanner
 Designed to maximize bounty impact and minimize noise.
@@ -60,6 +60,7 @@ import hashlib
 import threading
 import copy
 import socket
+import ipaddress
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -84,7 +85,7 @@ try:
 except ImportError:
     HAS_ASYNC = False
 
-__version__ = '5.1.2'
+__version__ = '5.2.0'
 __author__  = 'Vinod Kumar Bontha'
 __lines__   = '10,900+'
 
@@ -1441,7 +1442,7 @@ class FalsePositiveFilter:
 
     # File path patterns that indicate test/example content
     TEST_FILE_PATTERNS = [
-        r'(?:__)?test(?:s)?(?:__)?[/\\]', r'\.test\.[jt]sx?$',
+        r'(?:^|[/\\])(?:__)?tests?(?:__)?[/\\]', r'\.test\.[jt]sx?$',
         r'\.spec\.[jt]sx?$', r'\.stories\.[jt]sx?$',
         r'mock[/\\]', r'fixture[/\\]', r'__mocks__[/\\]',
         r'example[s]?[/\\]', r'sample[s]?[/\\]', r'demo[/\\]',
@@ -1550,10 +1551,14 @@ class FalsePositiveFilter:
             if re.search(pattern, source, re.IGNORECASE):
                 return True, f'Test/example file: {source}'
 
-        # Check documentation sources
-        for doc in FalsePositiveFilter.DOC_PATTERNS:
-            if doc in src_lower:
-                return True, f'Documentation source: {doc}'
+        # Check documentation sources by exact path segment or filename stem
+        src_path = re.split(r'[?#]', src_lower, maxsplit=1)[0]
+        for part in re.split(r'[\\/]+', src_path):
+            part = part.strip()
+            if part in FalsePositiveFilter.DOC_PATTERNS:
+                return True, f'Documentation source: {part}'
+            if part.rsplit('.', 1)[0] in FalsePositiveFilter.DOC_PATTERNS:
+                return True, f'Documentation source: {part}'
 
         # Repetitive characters (low entropy but matched regex)
         if len(set(vl)) <= 3 and len(vl) > 8:
@@ -3429,11 +3434,9 @@ jobs:
 
       - name: Run Secret Scanner
         run: |
-          python secret_scanner_v3.0.py ${{ vars.SCAN_TARGET }} \\
-            --verify --probe-env --probe-graphql \\
+          python SecretPulse.py --path . --fail-on high \\
             --sarif results.sarif \\
-            -o results.json --html report.html \\
-            --rate-limit 5
+            -o results.json --html report.html
 
       - name: Upload SARIF
         if: always()
@@ -3463,10 +3466,7 @@ jobs:
   image: python:3.11-slim
   script:
     - pip install requests pyyaml
-    - python secret_scanner_v3.0.py $SCAN_TARGET
-        --verify --probe-env --probe-graphql
-        --sarif gl-secret-detection-report.json
-        -o results.json --rate-limit 5
+    - python SecretPulse.py --path . --fail-on high --sarif gl-secret-detection-report.json -o results.json
   artifacts:
     reports:
       sast: gl-secret-detection-report.json
@@ -3535,14 +3535,14 @@ exit 0
             print(f"{Colors.FAIL}[!] Baseline error: {e}{Colors.ENDC}")
             return current_findings, []
 
-        prev = baseline.get('findings', [])
-        prev_keys = {f"{f['type']}:{f['value']}" for f in prev}
-        curr_keys = {f"{f['type']}:{f['value']}" for f in current_findings}
+        prev = baseline.get('unified_findings') or baseline.get('findings', [])
+        prev_keys = {f"{f.get('type', '')}:{f.get('value', '')}" for f in prev}
+        curr_keys = {f"{f.get('type', '')}:{f.get('value', '')}" for f in current_findings}
 
         new_findings = [f for f in current_findings
-                        if f"{f['type']}:{f['value']}" not in prev_keys]
+                        if f"{f.get('type', '')}:{f.get('value', '')}" not in prev_keys]
         resolved = [f for f in prev
-                    if f"{f['type']}:{f['value']}" not in curr_keys]
+                    if f"{f.get('type', '')}:{f.get('value', '')}" not in curr_keys]
 
         return new_findings, resolved
 
@@ -5150,7 +5150,7 @@ class BatchScanner:
 class SecretPulseDB:
     """
     SQLite-backed persistence for findings, subdomains, scan history.
-    Enables incremental scanning, historical comparison, and correlation.
+    Enables historical comparison, URL change tracking, and correlation.
     """
 
     DB_DIR = Path.home() / '.SecretPulse'
@@ -5226,11 +5226,27 @@ class SecretPulseDB:
                 FOREIGN KEY (scan_id) REFERENCES scans(id)
             );
 
+            CREATE TABLE IF NOT EXISTS scan_findings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_id INTEGER NOT NULL,
+                finding_id INTEGER NOT NULL,
+                value_hash TEXT NOT NULL,
+                UNIQUE(scan_id, finding_id),
+                FOREIGN KEY (scan_id) REFERENCES scans(id),
+                FOREIGN KEY (finding_id) REFERENCES findings(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_subdomains_domain ON subdomains(domain);
             CREATE INDEX IF NOT EXISTS idx_findings_hash ON findings(value_hash);
             CREATE INDEX IF NOT EXISTS idx_findings_type ON findings(type);
             CREATE INDEX IF NOT EXISTS idx_scan_urls_url ON scan_urls(url);
+            CREATE INDEX IF NOT EXISTS idx_scan_findings_scan ON scan_findings(scan_id);
+            CREATE INDEX IF NOT EXISTS idx_scan_findings_hash ON scan_findings(value_hash);
         """)
+        self.conn.execute(
+            """INSERT OR IGNORE INTO scan_findings (scan_id, finding_id, value_hash)
+               SELECT scan_id, id, value_hash FROM findings WHERE scan_id IS NOT NULL"""
+        )
         self.conn.commit()
 
     def start_scan(self, target: str, config: dict = None) -> int:
@@ -5284,37 +5300,48 @@ class SecretPulseDB:
         self.conn.commit()
 
     def save_finding(self, scan_id: int, finding: dict):
-        """Upsert a finding — increment times_seen if already known."""
+        """Upsert a finding and link it to the current scan."""
         value_hash = hashlib.sha256(
             f"{finding.get('type', '')}:{finding.get('value', '')}".encode()
         ).hexdigest()[:16]
         now = datetime.now(timezone.utc).isoformat()
+        confidence = finding.get('confidence_score')
+        if confidence is None:
+            confidence = {'HIGH': 80, 'MEDIUM': 50, 'LOW': 20}.get(
+                str(finding.get('confidence', '')).upper(), 0)
+        verified_live = int(bool(finding.get('verified_live')))
         existing = self.conn.execute(
             "SELECT id, times_seen FROM findings WHERE value_hash=?",
             (value_hash,)
         ).fetchone()
         if existing:
+            finding_id = existing['id']
             self.conn.execute(
                 """UPDATE findings SET last_seen=?, times_seen=times_seen+1,
                    severity=?, confidence=?, verified_live=?,
                    risk_score=? WHERE id=?""",
                 (now, finding.get('severity', '') or '',
-                 finding.get('confidence_score') or 0,
-                 int(finding.get('verified_live') or False),
-                 finding.get('risk_score') or 0, existing['id'])
+                 confidence, verified_live,
+                 finding.get('risk_score') or 0, finding_id)
             )
         else:
-            self.conn.execute(
+            cur = self.conn.execute(
                 """INSERT INTO findings
                    (scan_id, type, value_hash, value_preview, source, severity,
                     confidence, risk_score, verified_live, first_seen, last_seen, raw_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (scan_id, finding.get('type', '') or '', value_hash,
                  (finding.get('value', '') or '')[:30] + '...', finding.get('source', '') or '',
-                 finding.get('severity', '') or '', finding.get('confidence_score') or 0,
-                 finding.get('risk_score') or 0, int(finding.get('verified_live') or False),
+                 finding.get('severity', '') or '', confidence,
+                 finding.get('risk_score') or 0, verified_live,
                  now, now, json.dumps(finding, default=str))
             )
+            finding_id = cur.lastrowid
+        self.conn.execute(
+            """INSERT OR IGNORE INTO scan_findings (scan_id, finding_id, value_hash)
+               VALUES (?, ?, ?)""",
+            (scan_id, finding_id, value_hash)
+        )
         self.conn.commit()
 
     def get_subdomains(self, domain: str, alive_only: bool = False) -> List[dict]:
@@ -5346,7 +5373,7 @@ class SecretPulseDB:
         return [dict(r) for r in rows]
 
     def has_url_changed(self, url: str, content_hash: str) -> bool:
-        """Check if URL content changed since last scan (for incremental mode)."""
+        """Check if URL content changed since the last recorded scan."""
         row = self.conn.execute(
             "SELECT content_hash FROM scan_urls WHERE url=? ORDER BY id DESC LIMIT 1",
             (url,)
@@ -5356,7 +5383,7 @@ class SecretPulseDB:
         return True
 
     def save_url_state(self, scan_id: int, url: str, status_code: int, content_hash: str):
-        """Record URL state for incremental scanning."""
+        """Record URL state for differential scanning."""
         self.conn.execute(
             """INSERT INTO scan_urls (scan_id, url, status_code, content_hash, last_scanned)
                VALUES (?, ?, ?, ?, ?)""",
@@ -5393,8 +5420,9 @@ class SecretPulseDB:
 
         # Get previous findings
         prev_findings = [dict(r) for r in self.conn.execute(
-            "SELECT type, value_hash, value_preview, source, severity, confidence "
-            "FROM findings WHERE scan_id=?", (prev_scan_id,)
+            "SELECT f.type, f.value_hash, f.value_preview, f.source, f.severity, f.confidence "
+            "FROM findings f JOIN scan_findings sf ON sf.finding_id=f.id "
+            "WHERE sf.scan_id=?", (prev_scan_id,)
         ).fetchall()]
 
         # Get previous subdomains
@@ -6437,11 +6465,14 @@ class CORSDetector:
 
                 vuln = False
                 detail = ""
+                wildcard_credentials = False
 
                 if acao == '*' and acac == 'true':
                     vuln = True
-                    severity = "CRITICAL"
-                    detail = "Wildcard origin with credentials — full CORS bypass"
+                    wildcard_credentials = True
+                    severity = "MEDIUM"
+                    detail = ("Wildcard ACAO with credentials — invalid combination; "
+                              "browsers reject credentialed requests")
                 elif acao == test_origin and test_name in ('arbitrary_origin', 'subdomain_suffix', 'prefix_bypass'):
                     vuln = True
                     cred_note = " WITH credentials" if acac == 'true' else ""
@@ -6463,6 +6494,7 @@ class CORSDetector:
                         'origin_sent': test_origin,
                         'acao': acao,
                         'credentials': acac == 'true',
+                        'wildcard_credentials': wildcard_credentials,
                         'detail': detail,
                     }
                     self.findings.append(finding)
@@ -6566,6 +6598,7 @@ class OpenRedirectDetector:
 
             is_redirect = status in (301, 302, 303, 307, 308)
             redirects_external = False
+            verified_by = None
 
             if is_redirect and location:
                 loc_parsed = urlparse(location)
@@ -6573,12 +6606,19 @@ class OpenRedirectDetector:
                     redirects_external = True
                 elif location.startswith('//evil.com') or location.startswith('/\\evil.com'):
                     redirects_external = True
+                if redirects_external:
+                    verified_by = 'location'
 
-            # Also check meta refresh in body
+            # Client-side redirects are weaker evidence and require manual confirmation.
             if not is_redirect and status == 200:
                 body = resp.text[:2000].lower()
-                if 'evil.com' in body and ('meta' in body and 'refresh' in body or 'window.location' in body):
+                meta_refresh = bool(re.search(
+                    r'<meta[^>]+http-equiv=["\']?refresh', body))
+                js_redirect = bool(re.search(
+                    r'window\.location(?:\.href)?\s*=\s*["\'][^"\']*evil\.com', body))
+                if 'evil.com' in body and (meta_refresh or js_redirect):
                     redirects_external = True
+                    verified_by = 'body'
 
             if redirects_external:
                 severity = "HIGH" if 'oauth' in url.lower() or 'auth' in url.lower() else "MEDIUM"
@@ -6590,6 +6630,7 @@ class OpenRedirectDetector:
                     'severity': severity,
                     'status_code': status,
                     'location': location[:200],
+                    'verified_by': verified_by,
                     'detail': f"Parameter '{param}' redirects to external domain",
                 }
                 self.findings.append(finding)
@@ -6606,11 +6647,13 @@ class OpenRedirectDetector:
 
 class CloudPermissionTester:
     """
-    Test discovered cloud resources for misconfigurations:
-    - S3 bucket listing/write
+    Test discovered cloud resources for read-only misconfigurations:
+    - S3 bucket listing
     - GCS bucket access
     - Firebase open read
     - Azure blob public access
+
+    Never writes to or deletes from a discovered bucket.
     """
 
     def __init__(self, session, rate_limiter, verbose=False):
@@ -6620,7 +6663,7 @@ class CloudPermissionTester:
         self.findings: List[Dict] = []
 
     def test_s3_bucket(self, bucket_name: str):
-        """Test S3 bucket for public listing and write access."""
+        """Test S3 bucket for public listing without modifying it."""
         bucket_name = bucket_name.strip().strip('/')
         urls_to_try = [
             f"https://{bucket_name}.s3.amazonaws.com",
@@ -6650,33 +6693,6 @@ class CloudPermissionTester:
                         if self.verbose:
                             print(f"{Colors.FAIL}  [S3] [HIGH] Public listing: {bucket_name} "
                                   f"({len(keys)} objects){Colors.ENDC}")
-
-                        # Test WRITE (safe — upload empty test file, immediately delete)
-                        test_key = f"SecretPulse-security-test-{int(time.time())}.txt"
-                        try:
-                            self.rate_limiter.wait()
-                            put_resp = self.session.put(
-                                f"{base_url}/{test_key}",
-                                data="SecretPulse security test - safe to delete",
-                                timeout=8
-                            )
-                            if put_resp and put_resp.status_code in (200, 204):
-                                self.findings.append({
-                                    'type': 'S3 Bucket Public Write',
-                                    'severity': 'CRITICAL',
-                                    'bucket': bucket_name,
-                                    'url': base_url,
-                                    'detail': f"S3 bucket '{bucket_name}' allows PUBLIC WRITE — full takeover possible",
-                                })
-                                if self.verbose:
-                                    print(f"{Colors.FAIL}  [S3] [CRITICAL] PUBLIC WRITE: {bucket_name}{Colors.ENDC}")
-                                # Clean up
-                                try:
-                                    self.session.delete(f"{base_url}/{test_key}", timeout=5)
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
                         return  # Found listing, no need to try other URL format
                 elif resp and resp.status_code == 403:
                     # Bucket exists but not listable — that's OK
@@ -7385,8 +7401,8 @@ def load_custom_rules(filepath: str) -> Dict:
 def load_gitleaks_config(filepath: str) -> Dict:
     """Load a Gitleaks TOML config as SecretScanner pattern rules.
 
-    Requires tomllib (Python 3.11+) or tomli. Gitleaks regexes, secretGroup
-    and keywords are honored; Gitleaks allowlists are not applied.
+    Requires tomllib (Python 3.11+) or tomli. Gitleaks regexes, secretGroup,
+    keywords, and allowlists are honored.
     """
     rules = {}
     path = Path(filepath)
@@ -7408,11 +7424,36 @@ def load_gitleaks_config(filepath: str) -> Dict:
         print(f"{Colors.FAIL}[!] Error parsing Gitleaks config: {e}{Colors.ENDC}")
         return rules
 
+    global_allowlists = []
+    for key in ('allowlist', 'allowlists'):
+        val = data.get(key)
+        if isinstance(val, dict):
+            global_allowlists.append(val)
+        elif isinstance(val, list):
+            global_allowlists.extend(v for v in val if isinstance(v, dict))
+
     for rule in data.get('rules', []):
         rid = rule.get('id')
         regex = rule.get('regex')
         if not rid or not regex:
             continue
+        allowlists = list(global_allowlists)
+        for key in ('allowlist', 'allowlists'):
+            val = rule.get(key)
+            if isinstance(val, dict):
+                allowlists.append(val)
+            elif isinstance(val, list):
+                allowlists.extend(v for v in val if isinstance(v, dict))
+        for allowlist in allowlists:
+            valid = []
+            for pat in allowlist.get('regexes') or []:
+                try:
+                    re.compile(pat)
+                    valid.append(pat)
+                except re.error as e:
+                    print(f"{Colors.WARNING}  [!] Skipping invalid allowlist regex "
+                          f"in rule '{rid}': {e}{Colors.ENDC}")
+            allowlist['regexes'] = valid
         raw_patterns = regex if isinstance(regex, list) else [regex]
         compiled_ok = []
         for pat in raw_patterns:
@@ -7426,12 +7467,13 @@ def load_gitleaks_config(filepath: str) -> Dict:
             continue
         rules[f"Gitleaks: {rid}"] = {
             'patterns': compiled_ok,
-            'severity': str(rule.get('severity', 'HIGH')).upper(),
+            'severity': str(rule.get('severity', 'MEDIUM')).upper(),
             'validate': None,
             'case_sensitive': False,
             'context_required': False,
             'secret_group': rule.get('secretGroup', 0),
             'keywords': rule.get('keywords', []),
+            'allowlists': allowlists,
             'preserve_severity': True,
         }
 
@@ -7481,9 +7523,15 @@ def export_sarif(findings: List[Dict], stats: Dict, filename: str):
         if len(val_masked) > 12:
             val_masked = val_masked[:6] + '***' + val_masked[-4:]
 
+        level = rules[rule_id]['defaultConfiguration']['level']
+        if status == 'lead':
+            level = 'note'
+        elif status == 'potential' and level == 'error':
+            level = 'warning'
+
         result = {
             'ruleId': rule_id,
-            'level': rules[rule_id]['defaultConfiguration']['level'],
+            'level': level,
             'message': {
                 'text': f"Found {ftype} [{status}] "
                         f"(confidence: {f.get('confidence', '?')})"
@@ -7520,7 +7568,7 @@ def export_sarif(findings: List[Dict], stats: Dict, filename: str):
                 'driver': {
                     'name': 'SecretPulse',
                     'version': __version__,
-                    'informationUri': 'https://github.com/muizzamri/SecretPulse',
+                    'informationUri': 'https://github.com/Zero2Root-VK/SecretPulse',
                     'rules': list(rules.values()),
                 }
             },
@@ -7576,10 +7624,16 @@ class SecretScanner:
         self.scope_domains = scope_domains or []
         self.baseline_path = baseline_path
         self.found_secrets: List[Dict] = []
+        self.jwt_findings: List[Dict] = []
+        self.dep_confusion_findings: List[Dict] = []
+        self.smart_selected_modules: Set[str] = set()
+        self.exit_findings: Optional[List[Dict]] = None
         self.local_files_scanned = 0
         self.git_commits_scanned = 0
         self.seen_secrets: Set[str] = set()
+        self.gitleaks_allowlisted_values: Set[str] = set()
         self.scanned_urls: Set[str] = set()
+        self.url_status: Dict[str, int] = {}
         self.blocked_urls: Set[str] = set()
         self.discovered_endpoints: List[Dict] = []
         self.discovered_internal_urls: List[Dict] = []
@@ -8610,6 +8664,8 @@ class SecretScanner:
 
         for match in pattern.finditer(content):
             val = match.group(1)
+            if val in self.gitleaks_allowlisted_values:
+                continue
             h = f"HighEntropy:{val}"
             if h in self.seen_secrets:
                 continue
@@ -8767,6 +8823,40 @@ class SecretScanner:
     #  Core scanning
     # ═════════════════════════════════════════════════════════════
 
+    @staticmethod
+    def _gitleaks_allowlisted(config, value, content, source, match):
+        allowlists = config.get('allowlists') or []
+        if not allowlists:
+            return False
+        for allowlist in allowlists:
+            regexes = allowlist.get('regexes') or []
+            paths = allowlist.get('paths') or []
+            stopwords = allowlist.get('stopwords') or []
+            if not (regexes or paths or stopwords):
+                continue
+
+            target = value
+            regex_target = str(allowlist.get('regexTarget', 'secret')).lower()
+            if regex_target == 'match':
+                target = match.group(0)
+            elif regex_target == 'line':
+                line_start = content.rfind('\n', 0, match.start()) + 1
+                line_end = content.find('\n', match.end())
+                target = content[line_start:line_end if line_end != -1 else len(content)]
+
+            checks = []
+            if regexes:
+                checks.append(any(re.search(p, target, re.IGNORECASE) for p in regexes))
+            if paths:
+                checks.append(any(re.search(p, source, re.IGNORECASE) for p in paths))
+            if stopwords:
+                checks.append(any(w.lower() in value.lower() for w in stopwords))
+
+            condition = str(allowlist.get('condition', 'OR')).upper()
+            if (all(checks) if condition == 'AND' else any(checks)):
+                return True
+        return False
+
     def scan_content(self, content, source):
         if self._is_cdn_waf_source(source):
             return
@@ -8814,6 +8904,9 @@ class SecretScanner:
                         window = content[max(0, match.start() - 200):match.end() + 200].lower()
                         if not any(k.lower() in window for k in config['keywords']):
                             continue
+                    if self._gitleaks_allowlisted(config, val, content, source, match):
+                        self.gitleaks_allowlisted_values.add(val)
+                        continue
                     h = f"{secret_type}:{val}"
                     if h in self.seen_secrets:
                         continue
@@ -9144,6 +9237,7 @@ class SecretScanner:
                 print(f"{Colors.FAIL}[!] Could not fetch {url}{Colors.ENDC}")
                 return
 
+            self.url_status[url] = response.status_code
             html_content = response.text
             self.inspect_headers(response, url)
 
@@ -9170,9 +9264,9 @@ class SecretScanner:
 
             # v5.2: Exposure modules were previously constructed but never run.
             if depth == 0 and not is_archive_url:
-                if getattr(self, 'cors_detector', None):
+                if self.enable_cors and getattr(self, 'cors_detector', None):
                     self.cors_detector.test_url(url, urlparse(url).netloc)
-                if getattr(self, 'redirect_detector', None):
+                if self.enable_redirect and getattr(self, 'redirect_detector', None):
                     self.redirect_detector.scan_url(url)
 
             if depth == 0 and not is_archive_url:
@@ -9327,7 +9421,7 @@ class SecretScanner:
         'password': {'prob': 60, 'steps': ['Test credential against login endpoints', 'Check for password reuse across services', 'Verify account access level']},
         'key': {'prob': 45, 'steps': ['Identify the service this key belongs to', 'Test key against known API endpoints', 'Check for rate limiting or billing']},
         'secret': {'prob': 55, 'steps': ['Identify the associated service', 'Test secret against auth endpoints', 'Check scope and permissions']},
-        'bucket': {'prob': 65, 'steps': ['Test public read: aws s3 ls s3://<bucket>', 'Test write access with safe upload', 'Check for sensitive files (backups, configs)']},
+        'bucket': {'prob': 65, 'steps': ['Test public read: aws s3 ls s3://<bucket>', 'Review bucket policy/ACL for public write (read-only)', 'Check for sensitive files (backups, configs)']},
     }
 
     def _get_exploit_suggestions(self, finding):
@@ -9795,7 +9889,7 @@ class SecretScanner:
     def collect_findings(self):
         """Single source of truth for every module's findings.
 
-        Each entry carries a status tier so unverified signal (IDOR/SSRF/DOM
+        Each entry carries a status tier so unverified signal (IDOR/SSRF
         presence checks) is reported as a *lead* instead of a finding.
         """
         out = []
@@ -9819,33 +9913,75 @@ class SecretScanner:
                 verification={'detail': s.get('verification_detail', '')},
             ))
 
-        # CORS — deterministic header observation
+        # CORS — wildcard+credentials is an invalid browser combination
         for f in (getattr(getattr(self, 'cors_detector', None), 'findings', None) or []):
+            cors_confirmed = bool(f.get('credentials')) and not f.get('wildcard_credentials')
             add(self._mk_finding(
                 'cors', f.get('type', 'CORS Misconfiguration'), f.get('severity'),
-                'HIGH', 'confirmed' if f.get('credentials') else 'potential',
+                'HIGH', 'confirmed' if cors_confirmed else 'potential',
                 f.get('url', ''), f.get('detail', ''),
                 evidence={'origin_sent': f.get('origin_sent'),
                           'acao': f.get('acao'),
-                          'credentials': f.get('credentials')},
+                          'credentials': f.get('credentials'),
+                          'wildcard_credentials': f.get('wildcard_credentials', False)},
             ))
 
-        # Open redirect — deterministic Location observation
+        # Open redirect — only a 3xx Location response is confirmed
         for f in (getattr(getattr(self, 'redirect_detector', None), 'findings', None) or []):
             add(self._mk_finding(
                 'redirect', f.get('type', 'Open Redirect'), f.get('severity'),
-                'HIGH', 'confirmed', f.get('url', ''), f.get('detail', ''),
+                'HIGH', 'confirmed' if f.get('verified_by') == 'location' else 'potential',
+                f.get('url', ''), f.get('detail', ''),
                 evidence={'param': f.get('param'), 'payload': f.get('payload'),
                           'status_code': f.get('status_code'),
-                          'location': f.get('location')},
+                          'location': f.get('location'),
+                          'verified_by': f.get('verified_by')},
             ))
 
-        # Cloud-native findings
+        # Cloud-native findings are regex indicators, not confirmed exposure
         cloud_findings = getattr(getattr(self, 'cloud_scanner', None), 'findings', None) or []
         for f in cloud_findings:
             add(self._mk_finding(
                 'cloud', f.get('type'), f.get('severity'), 'MEDIUM',
-                'confirmed', f.get('source', ''), f.get('detail', ''), evidence=f,
+                'lead', f.get('source', ''), f.get('detail', ''), evidence=f,
+            ))
+
+        # Cloud permission findings are read-only HTTP observations
+        cloud_perm_findings = getattr(
+            getattr(self, 'cloud_perm_tester', None), 'findings', None) or []
+        for f in cloud_perm_findings:
+            add(self._mk_finding(
+                'cloud_permissions', f.get('type'), f.get('severity'), 'HIGH',
+                'confirmed', f.get('url') or f.get('bucket', ''), f.get('detail', ''),
+                evidence=f,
+            ))
+
+        # JWT findings — weak signing keys are provable offline
+        for f in (getattr(self, 'jwt_findings', None) or []):
+            ftype = f.get('type', 'JWT Finding')
+            jwt_confirmed = ftype == 'JWT Weak Secret'
+            value = f.get('secret') or f.get('forged_token') or f.get('detail', '')
+            add(self._mk_finding(
+                'jwt', ftype, f.get('severity'), 'HIGH' if jwt_confirmed else 'MEDIUM',
+                'confirmed' if jwt_confirmed else 'lead',
+                f.get('source', ''), value, evidence=f,
+                verification={'detail': f.get('detail', '')},
+            ))
+
+        # Dependency confusion — absence from npm is verified, exploitation is not
+        for f in (getattr(self, 'dep_confusion_findings', None) or []):
+            pkg = f.get('package', '')
+            add(self._mk_finding(
+                'dependency', f.get('type', 'Dependency Confusion'), f.get('severity'),
+                'MEDIUM', 'potential', f"npm:{pkg}", pkg, evidence=f,
+            ))
+
+        # Subdomain takeover signatures and dangling DNS are indicators only
+        for f in (getattr(getattr(self, 'subtko', None), 'findings', None) or []):
+            signature = f.get('signature', 'Dangling subdomain')
+            add(self._mk_finding(
+                'takeover', 'Subdomain Takeover Indicator', f.get('severity', 'INFO'),
+                'MEDIUM', 'lead', f.get('domain', ''), signature, evidence=f,
             ))
 
         # Security header findings
@@ -9893,7 +10029,7 @@ class SecretScanner:
             'blocking': sum(1 for f in findings if f['status'] in self.BLOCKING_STATUSES),
         }
 
-    def compute_exit_code(self, fail_on):
+    def compute_exit_code(self, fail_on, findings=None):
         """CI gate: 1 if confirmed/potential findings meet the severity threshold.
 
         Leads are intentionally excluded so unverified heuristics never fail a build.
@@ -9904,7 +10040,9 @@ class SecretScanner:
             str(fail_on).lower())
         if limit is None:
             return 0
-        blocking = [f for f in self.collect_findings()
+        if findings is None:
+            findings = self.collect_findings()
+        blocking = [f for f in findings
                     if f['status'] in self.BLOCKING_STATUSES]
         if not blocking:
             return 0
@@ -10397,8 +10535,8 @@ Examples:
     # v4.0: Offensive Recon
     parser.add_argument('--wayback', action='store_true', help='Mine Wayback Machine for historical JS/HTML')
     parser.add_argument('--subtko', action='store_true', help='Check for dangling DNS / unclaimed subdomains')
-    parser.add_argument('--ssrf-probe', action='store_true', help='Check for exposed internal endpoints')
-    parser.add_argument('--fuzz-idor', action='store_true', help='Check for access control misconfigurations')
+    parser.add_argument('--ssrf-probe', action='store_true', help='Detect SSRF indicators in JavaScript (unverified leads)')
+    parser.add_argument('--fuzz-idor', action='store_true', help='Collect IDOR/BOLA candidates (unverified leads)')
     parser.add_argument('--attack-chains', action='store_true', help='Map risk impact chains with exploitability scoring')
     # v5.0: New features
     parser.add_argument('-L', '--target-list', help='File with target URLs (one per line), use - for stdin')
@@ -10413,7 +10551,7 @@ Examples:
     parser.add_argument('--recon', action='store_true', help='Run subdomain recon (CT logs + DNS + risk scoring)')
     parser.add_argument('--recon-only', action='store_true', help='Only run recon, do not scan')
     parser.add_argument('--recon-top', type=int, default=0, help='Scan only top N high-risk subdomains')
-    parser.add_argument('--db', action='store_true', help='Enable SQLite persistence (incremental scanning)')
+    parser.add_argument('--db', action='store_true', help='Enable SQLite persistence and scan history')
     parser.add_argument('--db-stats', action='store_true', help='Show database statistics and exit')
     parser.add_argument('--db-history', action='store_true', help='Show scan history and exit')
     parser.add_argument('--diff', action='store_true', help='Show delta vs previous scan (requires --db)')
@@ -10425,7 +10563,7 @@ Examples:
     parser.add_argument('--open-redirect', action='store_true', help='Test for open redirect vulnerabilities')
     parser.add_argument('--dep-confusion', action='store_true', help='Check npm packages for dependency confusion')
     parser.add_argument('--jwt-exploit', action='store_true', help='Deep JWT exploitation testing')
-    parser.add_argument('--cloud-perms', action='store_true', help='Test cloud resource permissions (S3/GCS/Firebase)')
+    parser.add_argument('--cloud-perms', action='store_true', help='Read-only cloud permission checks (S3/GCS/Firebase)')
     parser.add_argument('--full', action='store_true', help='Enable ALL scanning modules (noisy — prefer --smart)')
     parser.add_argument('--smart', action='store_true',
                         help='Intelligence-driven scanning: auto-selects modules per target based on asset type')
@@ -10534,17 +10672,27 @@ Examples:
         # Validate URL structure
         try:
             parsed = urlparse(url)
-            if not parsed.netloc or '.' not in parsed.netloc:
+            if not parsed.netloc:
                 if args.verbose:
                     print(f"{Colors.WARNING}  [!] Rejected invalid target: {url}{Colors.ENDC}")
                 return None
-            # Reject loopback/internal targets by default (unless --scope allows it)
             host = (parsed.hostname or '').lower()
-            if host in ('localhost', '127.0.0.1', '0.0.0.0', '::1') or host.endswith('.localhost'):
-                if not any(host == d or host.endswith('.' + d) for d in scope_domains):
-                    if args.verbose:
-                        print(f"{Colors.WARNING}  [!] Rejected localhost target: {url}{Colors.ENDC}")
-                    return None
+            in_scope = any(host == d or host.endswith('.' + d) for d in scope_domains)
+            is_local = (host in ('localhost', '127.0.0.1', '0.0.0.0', '::1')
+                        or host.endswith('.localhost'))
+            try:
+                ip = ipaddress.ip_address(host)
+                is_local = is_local or ip.is_private or ip.is_loopback or ip.is_link_local
+            except ValueError:
+                pass
+            if is_local and not in_scope:
+                if args.verbose:
+                    print(f"{Colors.WARNING}  [!] Rejected local/private target without scope: {url}{Colors.ENDC}")
+                return None
+            if not is_local and '.' not in parsed.netloc:
+                if args.verbose:
+                    print(f"{Colors.WARNING}  [!] Rejected invalid target: {url}{Colors.ENDC}")
+                return None
         except Exception:
             return None
         return url
@@ -10558,7 +10706,7 @@ Examples:
             print(f"{Colors.OKGREEN}[+] Scope: {len(scope_domains)} domains{Colors.ENDC}")
         except FileNotFoundError:
             print(f"{Colors.FAIL}[!] Scope file not found: {args.scope}{Colors.ENDC}")
-            return
+            sys.exit(2)
 
     # Load custom rules
     custom_rules = None
@@ -10595,7 +10743,7 @@ Examples:
         urls_to_scan = [u for u in (validate_target(t) for t in raw_targets) if u]
         if not urls_to_scan:
             print(f"{Colors.FAIL}[!] No valid targets loaded from {args.target_list}{Colors.ENDC}")
-            return
+            sys.exit(2)
         rejected = len(raw_targets) - len(urls_to_scan)
         print(f"[*] Batch mode: {len(urls_to_scan)} valid targets loaded", end='')
         if rejected > 0:
@@ -10611,7 +10759,7 @@ Examples:
             print(f"[*] Loaded {len(urls_to_scan)} valid URLs\n")
         except FileNotFoundError:
             print(f"{Colors.FAIL}[!] File not found{Colors.ENDC}")
-            return
+            sys.exit(2)
     else:
         # CLI args — validate each target
         for raw_url in args.urls:
@@ -10624,7 +10772,13 @@ Examples:
     local_scan_requested = bool(args.path or args.git)
     if not urls_to_scan and not local_scan_requested:
         print(f"{Colors.FAIL}[!] No valid targets to scan{Colors.ENDC}")
-        return
+        sys.exit(2)
+    if args.path and not Path(args.path).expanduser().exists():
+        print(f"{Colors.FAIL}[!] Path not found: {args.path}{Colors.ENDC}")
+        sys.exit(2)
+    if args.git and not Path(args.git).expanduser().exists():
+        print(f"{Colors.FAIL}[!] Git repository not found: {args.git}{Colors.ENDC}")
+        sys.exit(2)
 
     if urls_to_scan:
         print(f"[*] Targets: {len(urls_to_scan)}")
@@ -10681,7 +10835,7 @@ Examples:
     if args.jwt_exploit:
         print(f"[*] JWT exploitation: ON")
     if args.cloud_perms:
-        print(f"[*] Cloud permission testing: ON")
+        print(f"[*] Cloud permission testing: ON (read-only)")
     if args.smart:
         print(f"[*] {Colors.OKGREEN}SMART MODE: ON — modules selected per target{Colors.ENDC}")
     print()
@@ -10727,6 +10881,12 @@ Examples:
                     print(f"{Colors.OKGREEN}[+] Added {len(recon_urls)} subdomain URLs "
                           f"to scan queue{Colors.ENDC}\n")
 
+    if args.recon_only:
+        print(f"\n{Colors.OKBLUE}[*] Recon complete. No live subdomains discovered.{Colors.ENDC}")
+        if db:
+            db.close()
+        return
+
     # ── Smart Router: Build per-target scan plan ──
     smart_plan = []
     if args.smart and urls_to_scan:
@@ -10764,6 +10924,7 @@ Examples:
         # Smart routing: dynamically enable/disable modules per target
         if args.smart and smart_plan:
             active_modules = SmartRouter.get_modules_for_url(url, smart_plan)
+            scanner.smart_selected_modules.update(active_modules)
             scanner.probe_env = 'probe_env' in active_modules
             scanner.probe_graphql = 'probe_graphql' in active_modules
             scanner.probe_swagger = 'probe_swagger' in active_modules
@@ -10897,22 +11058,6 @@ Examples:
         rate_sum = scanner.rate_tester.get_summary()
         scanner.stats['rate_abuse_unrestricted'] = rate_sum['unrestricted']
 
-    # v3.0: Baseline diff
-    if args.baseline:
-        new_findings, resolved = CICDIntegration.diff_baseline(
-            scanner.found_secrets, args.baseline)
-        print(f"\n{Colors.BOLD}📊 Baseline Diff:{Colors.ENDC}")
-        print(f"  New findings: {len(new_findings)}")
-        print(f"  Resolved: {len(resolved)}")
-        if new_findings:
-            print(f"\n{Colors.WARNING}New findings:{Colors.ENDC}")
-            for f in new_findings[:10]:
-                print(f"  + [{f['severity']}] {f['type']} in {f['source'][:60]}")
-        if resolved:
-            print(f"\n{Colors.OKGREEN}Resolved:{Colors.ENDC}")
-            for f in resolved[:10]:
-                print(f"  - [{f['severity']}] {f['type']}")
-
     # Collect supply chain stats
     sc_sum = scanner.supply_chain.get_summary()
     scanner.stats['supply_chain_vulns'] = sc_sum['vulnerable_libraries']
@@ -10982,11 +11127,14 @@ Examples:
         for item in exposure_items:
             print(f"  {item}")
 
+    smart_modules = getattr(scanner, 'smart_selected_modules', set())
+
     # v6.0: Dependency confusion (runs post-scan using source map data)
-    if args.dep_confusion and scanner.source_map_intel:
+    if (args.dep_confusion or 'dep_confusion' in smart_modules) and scanner.source_map_intel:
         dep_scanner = DependencyConfusionScanner(scanner.session, scanner.rate_limiter, args.verbose)
         target_domain = urlparse(urls_to_scan[0]).netloc if urls_to_scan else ''
         dep_scanner.check_from_source_maps(scanner.source_map_intel, target_domain)
+        scanner.dep_confusion_findings = dep_scanner.findings
         if dep_scanner.findings:
             print(f"\n{Colors.FAIL}[!] Dependency Confusion: "
                   f"{len(dep_scanner.findings)} vulnerable package(s){Colors.ENDC}")
@@ -10994,20 +11142,21 @@ Examples:
                 print(f"  [{f['severity']}] {f['detail']}")
 
     # v6.0: JWT exploitation (runs post-scan on discovered JWTs)
-    if args.jwt_exploit and scanner.found_secrets:
+    if (args.jwt_exploit or 'jwt_exploit' in smart_modules) and scanner.found_secrets:
         jwt_tester = JWTExploitTester(scanner.session, scanner.rate_limiter, args.verbose)
         jwt_findings = [f for f in scanner.found_secrets if 'JWT' in f.get('type', '').upper()
                         or f.get('type', '') == 'JSON Web Token']
         for jf in jwt_findings:
             jwt_tester.test_token(jf.get('value', ''), jf.get('source', ''))
+        scanner.jwt_findings = jwt_tester.findings
         if jwt_tester.findings:
             print(f"\n{Colors.FAIL}[!] JWT Exploitation: "
                   f"{len(jwt_tester.findings)} finding(s){Colors.ENDC}")
             for f in jwt_tester.findings[:5]:
                 print(f"  [{f['severity']}] {f['detail']}")
 
-    # v6.0: Cloud permission testing (runs post-scan on discovered cloud resources)
-    if args.cloud_perms and scanner.found_secrets:
+    # v6.0: Cloud permission testing (read-only, runs post-scan)
+    if (args.cloud_perms or 'cloud_perms' in smart_modules) and scanner.found_secrets:
         if not getattr(scanner, 'cloud_perm_tester', None):
             scanner.cloud_perm_tester = CloudPermissionTester(
                 scanner.session, scanner.rate_limiter, args.verbose)
@@ -11017,6 +11166,25 @@ Examples:
                   f"{len(scanner.cloud_perm_tester.findings)} misconfig(s){Colors.ENDC}")
             for f in scanner.cloud_perm_tester.findings[:5]:
                 print(f"  [{f['severity']}] {f['detail']}")
+
+    current_findings = scanner.collect_findings()
+
+    # v3.0: Baseline diff — the gate must evaluate only findings new since the baseline
+    if args.baseline:
+        new_findings, resolved = CICDIntegration.diff_baseline(
+            current_findings, args.baseline)
+        scanner.exit_findings = new_findings
+        print(f"\n{Colors.BOLD}📊 Baseline Diff:{Colors.ENDC}")
+        print(f"  New findings: {len(new_findings)}")
+        print(f"  Resolved: {len(resolved)}")
+        if new_findings:
+            print(f"\n{Colors.WARNING}New findings:{Colors.ENDC}")
+            for f in new_findings[:10]:
+                print(f"  + [{f['severity']}] {f['type']} in {f.get('source', '')[:60]}")
+        if resolved:
+            print(f"\n{Colors.OKGREEN}Resolved:{Colors.ENDC}")
+            for f in resolved[:10]:
+                print(f"  - [{f['severity']}] {f['type']}")
 
     # v5.1.1: Top targets worth manual testing (v5.1.2: fixed empty modules)
     if args.smart and smart_plan:
@@ -11047,10 +11215,15 @@ Examples:
         target_domain = urlparse(urls_to_scan[0]).netloc if urls_to_scan else (args.git or args.path or 'local')
         prev_scan = db.get_previous_scan_data(target_domain)
     if db and scan_id:
-        for finding in scanner.found_secrets:
+        for finding in current_findings:
             db.save_finding(scan_id, finding)
+        for url in scanner.scanned_urls:
+            content = scanner.content_cache.get(url, '')
+            content_hash = hashlib.sha256(
+                content.encode('utf-8', 'ignore')).hexdigest()[:16]
+            db.save_url_state(scan_id, url, scanner.url_status.get(url, 0), content_hash)
         db.finish_scan(scan_id, len(scanner.scanned_urls) + scanner.local_files_scanned,
-                       len(scanner.found_secrets), elapsed)
+                       len(current_findings), elapsed)
         db_stats = db.get_stats()
         print(f"\n{Colors.DIM}[DB] Scan #{scan_id} saved | "
               f"Total: {db_stats['total_findings']} findings across "
@@ -11061,35 +11234,33 @@ Examples:
             prev = prev_scan
             if prev and prev.get('scan_id') and prev['scan_id'] != scan_id:
                 print(f"\n{Colors.BOLD}📊 DIFFERENTIAL SCAN (vs scan #{prev['scan_id']}):{Colors.ENDC}")
-                # New findings
                 current_hashes = set()
-                for f in scanner.found_secrets:
-                    h = hashlib.sha256(f"{f.get('type','')}:{f.get('value','')}".encode()).hexdigest()[:16]
+                for f in current_findings:
+                    h = hashlib.sha256(
+                        f"{f.get('type', '')}:{f.get('value', '')}".encode()).hexdigest()[:16]
                     current_hashes.add(h)
                 new_finding_hashes = current_hashes - prev['finding_hashes']
                 resolved_hashes = prev['finding_hashes'] - current_hashes
                 if new_finding_hashes:
                     print(f"  {Colors.WARNING}New findings: {len(new_finding_hashes)}{Colors.ENDC}")
-                    for f in scanner.found_secrets:
-                        h = hashlib.sha256(f"{f.get('type','')}:{f.get('value','')}".encode()).hexdigest()[:16]
+                    for f in current_findings:
+                        h = hashlib.sha256(
+                            f"{f.get('type', '')}:{f.get('value', '')}".encode()).hexdigest()[:16]
                         if h in new_finding_hashes:
-                            print(f"    {Colors.WARNING}+ [{f.get('severity','?')}] {f['type']} in {f.get('source','?')[:50]}{Colors.ENDC}")
+                            print(f"    {Colors.WARNING}+ [{f.get('severity', '?')}] "
+                                  f"{f['type']} in {f.get('source', '?')[:50]}{Colors.ENDC}")
                 if resolved_hashes:
                     print(f"  {Colors.OKGREEN}Resolved: {len(resolved_hashes)} finding(s) no longer detected{Colors.ENDC}")
 
-                # New subdomains
-                if hasattr(scanner, 'scanned_urls'):
-                    current_urls = scanner.scanned_urls
-                    prev_url_set = set(prev.get('url_hashes', {}).keys())
-                    new_urls = current_urls - prev_url_set
-                    if new_urls:
-                        print(f"  {Colors.OKCYAN}New endpoints: {len(new_urls)}{Colors.ENDC}")
-                        for u in sorted(new_urls)[:5]:
-                            print(f"    + {u[:70]}")
+                # New endpoints
+                current_urls = set(scanner.scanned_urls)
+                prev_url_set = set(prev.get('url_hashes', {}).keys())
+                new_urls = current_urls - prev_url_set
+                if new_urls:
+                    print(f"  {Colors.OKCYAN}New endpoints: {len(new_urls)}{Colors.ENDC}")
+                    for u in sorted(new_urls)[:5]:
+                        print(f"    + {u[:70]}")
 
-                # Header/SRI changes
-                current_header_count = len(scanner.headers_auditor.findings)
-                current_sri = scanner.supply_chain.get_summary()['sri_missing']
                 print(f"  {Colors.DIM}URLs scanned: {len(scanner.scanned_urls)} "
                       f"(prev: {len(prev.get('urls', []))}){Colors.ENDC}")
                 if not new_finding_hashes and not resolved_hashes:
@@ -11127,10 +11298,14 @@ Examples:
 
     # v5.2: CI exit gate — only confirmed/potential findings count; leads never fail.
     if getattr(args, 'fail_on', 'none') != 'none':
-        summary = scanner.get_finding_summary()
-        code = scanner.compute_exit_code(args.fail_on)
+        gate_findings = (scanner.exit_findings
+                         if scanner.exit_findings is not None
+                         else scanner.collect_findings())
+        blocking_count = sum(
+            1 for f in gate_findings if f['status'] in scanner.BLOCKING_STATUSES)
+        code = scanner.compute_exit_code(args.fail_on, gate_findings)
         if code:
-            print(f"{Colors.FAIL}[!] Failing build: {summary['blocking']} "
+            print(f"{Colors.FAIL}[!] Failing build: {blocking_count} "
                   f"confirmed/potential finding(s) meet --fail-on "
                   f"{args.fail_on}{Colors.ENDC}")
         else:

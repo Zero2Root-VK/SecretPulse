@@ -1,6 +1,6 @@
 # <img src="secretpulse-icon.svg" width="32" height="32" alt=""> SecretPulse — The Scanner That Proves It
 
-![Version](https://img.shields.io/badge/version-5.1.2-blue)
+![Version](https://img.shields.io/badge/version-5.2.0-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-Standard-cyan)
 ![Modules](https://img.shields.io/badge/modules-13-purple)
@@ -14,7 +14,7 @@ $ python3 SecretPulse.py https://target.com --smart
 
 [RECON] CT: 47 subs | DNS: 23 alive | High risk: 6
 [SMART] api.target.com → cors, jwt, swagger
-[SMART] admin.target.com → dom-xss, env, cors
+[SMART] admin.target.com → env, cors, open-redirect
 
 [CRITICAL] Stripe Secret Key
   Confidence: 94/100  Status: Pattern matched
@@ -29,7 +29,9 @@ $ python3 SecretPulse.py https://target.com --smart
 | Confidence scoring | 6-factor (0-100) | ✗ | ✗ | Binary |
 | Smart routing | Per-target modules | ✗ | ✗ | ✗ |
 | WAF adaptation | Auto-stealth | ✗ | ✗ | ✗ |
-| CORS + DOM XSS | 6+14 techniques | ✗ | ✗ | ✗ |
+| CORS + open redirect | 6+3 techniques | ✗ | ✗ | ✗ |
+| Local files + git history | Native | ✓ | ✓ | ✓ |
+| CI severity gate | `--fail-on` | ✗ | ✓ | ✓ |
 | False positive rate | < 5% | ~40% | ~35% | ~30% |
 
 ---
@@ -43,7 +45,8 @@ python3 SecretPulse.py https://target.com --smart
 
 ### Requirements
 - Python 3.8+
-- `pip install requests` (only dependency)
+- `pip install requests` (only required dependency)
+- `--gitleaks-config` requires Python 3.11+ (`tomllib`)
 
 ### Recommended Command
 
@@ -61,7 +64,8 @@ python3 SecretPulse.py https://target.com \
 ## Features
 
 - **90+ secret patterns** — API keys, tokens, credentials, cloud secrets
-- **13 scan modules** — CORS, DOM XSS, JWT, open redirect, cloud perms, dep confusion, SSRF, IDOR, subdomain takeover
+- **Modular scanning** — secrets, CORS, JWT, open redirect, read-only cloud permissions, dependency confusion, SSRF indicators, IDOR candidates, subdomain takeover
+- **Unified findings** — every result carries `confirmed`, `potential`, or `lead`; only confirmed/potential findings can fail a CI build
 - **6-factor confidence scoring** — format, context, ownership, file path, entropy, pattern match → single 0-100 score
 - **Smart mode** — classifies each subdomain (API, admin, auth, staging) and runs only relevant modules
 - **Subdomain recon** — CT logs + DNS resolution + HTTP probe + risk scoring
@@ -79,13 +83,17 @@ python3 SecretPulse.py https://target.com \
 python3 SecretPulse.py https://target.com --smart
 
 # Individual modules
-python3 SecretPulse.py https://target.com --cors-check --dom-xss --jwt-exploit
+python3 SecretPulse.py https://target.com --cors-check --jwt-exploit --open-redirect
+
+# Local files or git history (no network target required)
+python3 SecretPulse.py --path ./src --fail-on high
+python3 SecretPulse.py --git . --git-max-commits 200
 
 # Recon only (discover subdomains, don't scan)
 python3 SecretPulse.py target.com --recon-only --db
 
 # Stealth mode (WAF-heavy targets)
-python3 SecretPulse.py https://target.com --smart -w 2 -r 2 --ua-rotate
+python3 SecretPulse.py https://target.com --smart --workers 2 --rate-limit 2 --ua-rotate
 ```
 
 ---
@@ -105,7 +113,7 @@ python3 SecretPulse.py https://target.com --smart -w 2 -r 2 --ua-rotate
 
   ADMIN PANEL (1):
     [ 82] admin.target.com
-         modules: dom_xss, probe_env, cors_check
+         modules: probe_env, cors_check, open_redirect
 
   AUTH SERVICE (2):
     [ 85] auth.target.com
@@ -124,18 +132,22 @@ python3 SecretPulse.py https://target.com --smart -w 2 -r 2 --ua-rotate
 | `--db` | Enable SQLite persistence |
 | `--diff` | Show delta vs previous scan |
 | `--depth N` | Crawl depth (0 = target only) |
-| `-w N` | Concurrent workers (default 5) |
-| `-r N` | Rate limit (requests/sec, 0 = unlimited) |
+| `--workers N` | Concurrent workers (default 5) |
+| `--rate-limit N` | Rate limit (requests/sec, 0 = unlimited) |
 | `--ua-rotate` | Rotate User-Agent per request |
 | `-o FILE` | JSON output |
+| `--sarif FILE` | SARIF 2.1.0 output for code scanning |
 | `--report html` | Generate HTML report |
+| `--path PATH` | Scan a local file or directory |
+| `--git REPO` | Scan a local git repository's history |
+| `--gitleaks-config FILE` | Import Gitleaks TOML rules |
 | `--cors-check` | CORS misconfiguration testing |
-| `--dom-xss` | DOM XSS source/sink mapping |
 | `--jwt-exploit` | JWT exploitation testing |
 | `--open-redirect` | Open redirect testing |
-| `--cloud-perms` | Cloud permission testing (S3/GCS/Firebase) |
+| `--cloud-perms` | Read-only cloud permission checks (S3/GCS/Firebase) |
 | `--dep-confusion` | Dependency confusion checking |
 | `--recon-only` | Subdomain recon without scanning |
+| `--fail-on LEVEL` | Exit 1 on confirmed/potential findings at or above LEVEL |
 | `--db-stats` | Show database statistics |
 
 ---
