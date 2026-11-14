@@ -8,6 +8,7 @@ SecretPulse is designed for **authorized security testing only**. Before scannin
 2. Operate within the **scope** defined by the bug bounty program
 3. Follow the target's **rules of engagement**
 4. **Never** exfiltrate, modify, or destroy data
+5. SecretPulse's active verification and cloud permission checks do not write to target resources; `--notify` sends results only to the webhook you configure
 
 ## Reporting Vulnerabilities
 

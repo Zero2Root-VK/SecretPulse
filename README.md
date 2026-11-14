@@ -17,7 +17,7 @@ $ python3 SecretPulse.py https://target.com --smart
 [SMART] admin.target.com → env, cors, open-redirect
 
 [CRITICAL] Stripe Secret Key
-  Confidence: 94/100  Status: Pattern matched
+  Confidence: 94/100  |  Risk: 87/100
 ```
 
 ---
@@ -29,10 +29,9 @@ $ python3 SecretPulse.py https://target.com --smart
 | Confidence scoring | 6-factor (0-100) | ✗ | ✗ | Binary |
 | Smart routing | Per-target modules | ✗ | ✗ | ✗ |
 | WAF adaptation | Auto-stealth | ✗ | ✗ | ✗ |
-| CORS + open redirect | 6+3 techniques | ✗ | ✗ | ✗ |
+| CORS + open redirect | 6 CORS checks + 25 redirect params | ✗ | ✗ | ✗ |
 | Local files + git history | Native | ✓ | ✓ | ✓ |
-| CI severity gate | `--fail-on` | ✗ | ✓ | ✓ |
-| False positive rate | < 5% | ~40% | ~35% | ~30% |
+| CI exit gate | ✓ `--fail-on` | ✓ `--fail` | ✓ `--exit-code` | ✓ |
 
 ---
 
@@ -46,7 +45,7 @@ python3 SecretPulse.py https://target.com --smart
 ### Requirements
 - Python 3.8+
 - `pip install requests` (only required dependency)
-- `--gitleaks-config` requires Python 3.11+ (`tomllib`)
+- `--gitleaks-config` requires Python 3.11+ (`tomllib`) or `pip install tomli`
 
 ### Recommended Command
 
@@ -63,7 +62,7 @@ python3 SecretPulse.py https://target.com \
 
 ## Features
 
-- **90+ secret patterns** — API keys, tokens, credentials, cloud secrets
+- **124 built-in secret-pattern regexes across 78 types** — API keys, tokens, credentials, cloud secrets
 - **Modular scanning** — secrets, CORS, JWT, open redirect, read-only cloud permissions, dependency confusion, SSRF indicators, IDOR candidates, subdomain takeover
 - **Unified findings** — every result carries `confirmed`, `potential`, or `lead`; only confirmed/potential findings can fail a CI build
 - **6-factor confidence scoring** — format, context, ownership, file path, entropy, pattern match → single 0-100 score
@@ -140,7 +139,8 @@ python3 SecretPulse.py https://target.com --smart --workers 2 --rate-limit 2 --u
 | `--report html` | Generate HTML report |
 | `--path PATH` | Scan a local file or directory |
 | `--git REPO` | Scan a local git repository's history |
-| `--gitleaks-config FILE` | Import Gitleaks TOML rules |
+| `--gitleaks-config FILE` | Import Gitleaks TOML rules, including allowlists |
+| `--verify` | Active API verification (50 verifiers) |
 | `--cors-check` | CORS misconfiguration testing |
 | `--jwt-exploit` | JWT exploitation testing |
 | `--open-redirect` | Open redirect testing |
@@ -156,7 +156,7 @@ python3 SecretPulse.py https://target.com --smart --workers 2 --rate-limit 2 --u
 
 **Vinod Kumar Bontha**
 
-Built as a single Python file. 10,800+ lines. No frameworks. No cloud. No telemetry.
+Built as a single Python file. 11,300+ lines. No frameworks. No cloud. No telemetry.
 
 For authorized security testing only.
 

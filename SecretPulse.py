@@ -87,7 +87,7 @@ except ImportError:
 
 __version__ = '5.2.0'
 __author__  = 'Vinod Kumar Bontha'
-__lines__   = '10,900+'
+__lines__   = '11,300+'
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -3960,11 +3960,11 @@ class InternalAPIEnumerator:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  VALIDATION v2.0: 50+ Live API Verifiers — v4.0
+#  VALIDATION v2.0: 50 Live API Verifiers — v4.0
 # ═══════════════════════════════════════════════════════════════════
 
 class ActiveVerifierV2(ActiveVerifier):
-    """Extended verifier with 50+ API validation methods."""
+    """Extended verifier with 50 API validation methods."""
 
     def __init__(self, session):
         super().__init__(session)
@@ -4214,8 +4214,8 @@ class ActiveVerifierV2(ActiveVerifier):
 
     def verify_posthog(self, key, **kw):
         try:
-            r = self.session.post('https://app.posthog.com/api/projects/',
-                                   headers={'Authorization': f'Bearer {key}'}, timeout=8)
+            r = self.session.get('https://app.posthog.com/api/projects/',
+                                  headers={'Authorization': f'Bearer {key}'}, timeout=8)
             return {'live': r.status_code in (200, 403), 'status': r.status_code}
         except Exception: return {'live': False}
 
@@ -7689,7 +7689,7 @@ class SecretScanner:
             'Connection': 'keep-alive',
         })
 
-        # Active verifier — v4.0: 50+ verifiers
+        # Active verifier — v4.0: 50 verifiers
         self.verifier = ActiveVerifierV2(self.session) if verify_live else None
 
         # v3.0: API Discovery, Notifier
@@ -8980,7 +8980,7 @@ class SecretScanner:
                     if jwt_info:
                         finding['jwt_decoded'] = jwt_info
 
-                    # ── Active verification — v4.0 (50+ verifiers) ──
+                    # ── Active verification — v4.0 (50 verifiers) ──
                     if self.verifier:
                         vresult = self.verifier.verify(secret_type, val)
                         if vresult:
@@ -10523,7 +10523,7 @@ Examples:
     parser.add_argument('--probe-env', action='store_true', help='Probe for .env files')
     parser.add_argument('--probe-graphql', action='store_true', help='Probe GraphQL endpoints')
     parser.add_argument('--probe-swagger', action='store_true', help='Probe Swagger/OpenAPI specs')
-    parser.add_argument('--verify', action='store_true', help='Active API verification (15 verifiers)')
+    parser.add_argument('--verify', action='store_true', help='Active API verification (50 verifiers)')
     parser.add_argument('--rate-limit', type=float, default=0, help='Requests per second (0=unlimited)')
     parser.add_argument('--scope', help='Scope file (one domain per line)')
     parser.add_argument('--rules', help='Custom rules file (YAML or JSON)')
@@ -10793,7 +10793,7 @@ Examples:
     if args.ua_rotate:
         print(f"[*] UA rotation: ON")
     if args.verify:
-        print(f"[*] Active verification: ON (50+ API verifiers)")
+        print(f"[*] Active verification: ON (50 API verifiers)")
     if args.rate_limit:
         print(f"[*] Rate limit: {args.rate_limit} req/s")
     if args.probe_env:

@@ -16,6 +16,8 @@
 - Fixed smart-mode JWT/dependency/cloud modules being enabled by the planner but never run
 - Fixed generated GitHub Actions/GitLab CI filenames, YAML, and missing `--fail-on`
 - SARIF now maps leads to `note` and potential findings to `warning`
+- PostHog verification now uses a read-only project listing instead of a POST
+- Docs now match the implementation: 50 verifiers, 6 CORS checks + 25 redirect params, precise pattern counts, and no unmeasured false-positive-rate claims
 
 ## v5.1.2 (2026-02-16)
 ### New Features
@@ -50,7 +52,7 @@
 
 ## v5.0.0 (2026-01-28)
 - Initial release
-- 90+ secret patterns, 50+ API verifiers
+- 90+ secret patterns, 50 API verifiers
 - 13 scanning modules
 - 6-factor confidence scoring (0-100)
 - SmartRouter asset classification
