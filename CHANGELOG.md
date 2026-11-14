@@ -7,6 +7,12 @@
 - Advanced web modules remain available through `--smart`, which selects them per target
 - Smart mode now lazily initializes cloud-native scanning instead of relying on the removed `--scan-cloud` flag
 
+### Documentation
+- Split competitor comparison into secret-scanning parity and web-exposure scope
+- Corrected the misleading "GitGuardian Binary" claim; GitGuardian exposes five validity states plus severity/risk
+- Marked web-only capabilities as `N/A` for repository secret scanners instead of presenting them as weaknesses
+- Added TruffleHog verification and Gitleaks baseline capabilities to the comparison
+
 ## v5.2.0 (2026-11-14)
 ### New Features
 - **Unified findings model** — secrets, CORS, redirects, JWT, dependency confusion, cloud permissions, takeover indicators, headers, and recon leads share one status model: `confirmed`, `potential`, or `lead`

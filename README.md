@@ -22,16 +22,34 @@ $ python3 SecretPulse.py https://target.com --smart
 
 ---
 
-## Why SecretPulse?
+## How SecretPulse compares
 
-| Feature | SecretPulse | TruffleHog | Gitleaks | GitGuardian |
-|---------|---------|------------|----------|-------------|
-| Confidence scoring | 6-factor (0-100) | ✗ | ✗ | Binary |
-| Smart routing | Per-target modules | ✗ | ✗ | ✗ |
-| WAF adaptation | Auto-stealth | ✗ | ✗ | ✗ |
-| CORS + open redirect | 6 CORS checks + 25 redirect params | ✗ | ✗ | ✗ |
-| Local files + git history | Native | ✓ | ✓ | ✓ |
-| CI exit gate | ✓ `--fail-on` | ✓ `--fail` | ✓ `--exit-code` | ✓ |
+SecretPulse combines secret scanning with per-target web exposure checks. It is not a drop-in replacement for repository-only secret scanners, so the comparison is split by scope.
+
+### Secret scanning
+
+| Capability | SecretPulse | TruffleHog | Gitleaks | GitGuardian |
+|------------|-------------|------------|----------|-------------|
+| Detection breadth | 124 patterns / 78 types | 800+ detectors | Large built-in ruleset | Large detector set |
+| Live credential verification | 50 verifiers | ✓ Verified-only mode | ✗ | ✓ 5-state validity |
+| Finding prioritization | 6-factor confidence heuristic (0-100) | Verification + detector metadata | Entropy + allowlists | Validity + severity/risk |
+| Local files + git history | ✓ Native | ✓ | ✓ | ✓ Via integrations/`ggshield` |
+| Baseline / history comparison | ✓ `--diff`, `--baseline` | ✓ Git ranges | ✓ `--baseline-path` | ✓ Incident lifecycle |
+| CI failure gate | ✓ `--fail-on` | ✓ `--fail`, `--fail-verified` | ✓ `--exit-code` | ✓ CI integrations |
+
+### Web exposure extras
+
+| Capability | SecretPulse | TruffleHog | Gitleaks | GitGuardian |
+|------------|-------------|------------|----------|-------------|
+| Per-target smart routing | ✓ | N/A | N/A | N/A |
+| WAF adaptation | ✓ Auto-stealth | N/A | N/A | N/A |
+| CORS testing | ✓ 6 checks | N/A | N/A | N/A |
+| Open redirect testing | ✓ 25 parameters | N/A | N/A | N/A |
+| Other web probes | JWT, `.env`, GraphQL, Swagger, cloud permissions, dependency confusion, SSRF/IDOR indicators, takeover | N/A | N/A | N/A |
+
+`N/A` means the capability is outside that tool's scope, not that it is missing. TruffleHog and Gitleaks are repository scanners; GitGuardian is a secret-detection platform. Compare the web-exposure row against web scanners such as Nuclei or Burp Suite, not against secret scanners.
+
+Comparison sources, accessed 2026-11-14: [TruffleHog](https://github.com/trufflesecurity/trufflehog), [TruffleHog CI](https://trufflesecurity.com/docs/scanning-in-ci), [Gitleaks](https://github.com/gitleaks/gitleaks), [GitGuardian validity checks](https://docs.gitguardian.com/secrets-detection/customize-detection/validity-checks).
 
 ---
 
@@ -65,13 +83,13 @@ python3 SecretPulse.py https://target.com \
 - **124 built-in secret-pattern regexes across 78 types** — API keys, tokens, credentials, cloud secrets
 - **Modular scanning** — secrets, CORS, JWT, open redirect, read-only cloud permissions, dependency confusion, SSRF indicators, IDOR candidates, subdomain takeover
 - **Unified findings** — every result carries `confirmed`, `potential`, or `lead`; only confirmed/potential findings can fail a CI build
-- **6-factor confidence scoring** — format, context, ownership, file path, entropy, pattern match → single 0-100 score
+- **6-factor confidence scoring** — format, context, ownership, file path, entropy, live validation → single 0-100 score
 - **Smart mode** — classifies each subdomain (API, admin, auth, staging) and runs only relevant modules
 - **Subdomain recon** — CT logs + DNS resolution + HTTP probe + risk scoring
 - **WAF adaptive intelligence** — auto-detects Cloudflare/Akamai pressure, enters stealth mode, escalates to deep stealth
 - **Differential scanning** — `--diff` shows new findings, resolved issues, new endpoints vs previous scan
 - **SQLite persistence** — track findings across scans with `--db`
-- **JSON + HTML output** — dark-themed HTML reports with finding deduplication
+- **JSON + HTML + SARIF output** — dark-themed HTML reports with finding deduplication
 
 ---
 
@@ -149,7 +167,7 @@ Advanced modules — CORS, JWT, open redirect, cloud permissions, dependency con
 
 **Vinod Kumar Bontha**
 
-Built as a single Python file. 11,300+ lines. No frameworks. No cloud. No telemetry.
+Built as a single Python file. 11,300+ lines. No frameworks. No backend service. No telemetry.
 
 For authorized security testing only.
 
