@@ -69,6 +69,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
+import subprocess
 
 try:
     import yaml
@@ -2636,9 +2637,12 @@ class AccuracyEngine:
             original_severity = f.get('severity', 'LOW')
             sev_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1, 'INFO': 0}
             if sev_order.get(computed_severity, 0) < sev_order.get(original_severity, 0):
-                f['severity'] = computed_severity
-                f['severity_downgraded'] = True
-                notes.append(f"Severity {original_severity} -> {computed_severity} (confidence {confidence})")
+                if f.get('severity_pinned'):
+                    notes.append(f"Severity pinned at {original_severity} (rule-declared)")
+                else:
+                    f['severity'] = computed_severity
+                    f['severity_downgraded'] = True
+                    notes.append(f"Severity {original_severity} -> {computed_severity} (confidence {confidence})")
             if f.get('verified_live') is True and sev_order.get(computed_severity, 0) > sev_order.get(original_severity, 0):
                 f['severity'] = computed_severity
 
@@ -2980,7 +2984,7 @@ class AccuracyEngine:
             return 1.0
 
         # Calculate decay based on time since last verification
-        last_verified = entry.get('last_verified', entry.get('first_seen', now))
+        last_verified = entry.get('last_verified') or entry.get('first_seen', now)
         age_days = (now - last_verified) / 86400
 
         if age_days < 7:
@@ -3908,27 +3912,6 @@ class IDORFuzzer:
                     'url_pattern': m.group(0), 'id_value': m.group(1),
                     'base_url': base_url, 'severity': 'HIGH',
                 })
-
-    def fuzz_endpoint(self, url: str, original_id: str, get_fn, max_attempts: int = 5):
-        """Try adjacent IDs to detect IDOR."""
-        results = []
-        try:
-            orig_id_int = int(original_id)
-            test_ids = [orig_id_int - 1, orig_id_int + 1, orig_id_int + 100, 1, 0]
-        except ValueError:
-            return results
-        for test_id in test_ids[:max_attempts]:
-            test_url = url.replace(original_id, str(test_id))
-            try:
-                self.rate_limiter.wait()
-                resp = get_fn(test_url, timeout=8)
-                if resp and resp.status_code == 200:
-                    results.append({'url': test_url, 'id_tested': test_id,
-                                    'status': resp.status_code, 'size': len(resp.text)})
-            except Exception:
-                pass
-        return results
-
 
 # ═══════════════════════════════════════════════════════════════════
 #  OFFENSIVE RECON: Internal API Enumeration — v4.0
@@ -5083,12 +5066,11 @@ class RateAbuseTester:
 class BatchScanner:
     """
     Scan multiple targets from file or stdin with unified summary.
-    Supports per-target output, resume, and parallel target processing.
+    Supports per-target output and parallel target processing.
     """
 
     def __init__(self):
         self.target_results: List[Dict] = []
-        self.resume_file = '.scanner_resume.json'
 
     @staticmethod
     def load_targets(source: str) -> List[str]:
@@ -5116,26 +5098,6 @@ class BatchScanner:
             except FileNotFoundError:
                 print(f"{Colors.FAIL}[!] Target file not found: {source}{Colors.ENDC}")
         return targets
-
-    def save_progress(self, completed_targets: List[str]):
-        """Save progress for resume support."""
-        try:
-            with open(self.resume_file, 'w') as f:
-                json.dump({
-                    'completed': completed_targets,
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                }, f)
-        except Exception:
-            pass
-
-    def load_progress(self) -> List[str]:
-        """Load previously completed targets for resume."""
-        try:
-            with open(self.resume_file) as f:
-                data = json.load(f)
-                return data.get('completed', [])
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
 
     def add_result(self, target: str, findings_count: int, duration: float,
                    findings: List[Dict]):
@@ -5179,13 +5141,6 @@ class BatchScanner:
             live_tag = f" (⚡{r['live']} live)" if r['live'] > 0 else ''
             print(f"    {indicator} {r['target'][:50]:<50s} "
                   f"{r['findings']:>3d} findings  {r['duration']:>6.1f}s{live_tag}")
-
-    def cleanup_resume(self):
-        """Remove resume file after successful batch completion."""
-        try:
-            Path(self.resume_file).unlink(missing_ok=True)
-        except Exception:
-            pass
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -5975,27 +5930,27 @@ class SmartRouter:
         },
         'admin': {
             'type': 'admin_panel',
-            'modules': ['dom_xss', 'open_redirect', 'cors_check', 'probe_env'],
+            'modules': ['open_redirect', 'cors_check', 'probe_env'],
             'reason': 'Admin panel — high value, test for XSS + redirect + env leak',
         },
         'panel': {
             'type': 'admin_panel',
-            'modules': ['dom_xss', 'open_redirect', 'cors_check', 'probe_env'],
+            'modules': ['open_redirect', 'cors_check', 'probe_env'],
             'reason': 'Control panel — test auth bypass vectors',
         },
         'dashboard': {
             'type': 'admin_panel',
-            'modules': ['dom_xss', 'open_redirect', 'cors_check'],
+            'modules': ['open_redirect', 'cors_check'],
             'reason': 'Dashboard — client-side injection + redirect chains',
         },
         'console': {
             'type': 'admin_panel',
-            'modules': ['dom_xss', 'probe_env', 'cors_check'],
+            'modules': ['probe_env', 'cors_check'],
             'reason': 'Console — likely management interface',
         },
         'internal': {
             'type': 'internal',
-            'modules': ['probe_env', 'ssrf_probe', 'cors_check', 'dom_xss'],
+            'modules': ['probe_env', 'ssrf_probe', 'cors_check'],
             'reason': 'Internal service — often less hardened',
         },
         'intranet': {
@@ -6005,17 +5960,17 @@ class SmartRouter:
         },
         'staging': {
             'type': 'staging',
-            'modules': ['probe_env', 'dom_xss', 'cors_check', 'open_redirect'],
+            'modules': ['probe_env', 'cors_check', 'open_redirect'],
             'reason': 'Staging env — debug mode, exposed configs likely',
         },
         'dev': {
             'type': 'staging',
-            'modules': ['probe_env', 'dom_xss', 'cors_check', 'probe_swagger'],
+            'modules': ['probe_env', 'cors_check', 'probe_swagger'],
             'reason': 'Dev environment — weak security posture expected',
         },
         'test': {
             'type': 'staging',
-            'modules': ['probe_env', 'dom_xss', 'cors_check'],
+            'modules': ['probe_env', 'cors_check'],
             'reason': 'Test environment — may have debug endpoints',
         },
         'auth': {
@@ -6116,7 +6071,7 @@ class SmartRouter:
     }
 
     # Default modules for unknown asset types
-    DEFAULT_MODULES = ['probe_env', 'cors_check', 'dom_xss']
+    DEFAULT_MODULES = ['probe_env', 'cors_check']
 
     # Always-on modules (run on every target regardless)
     ALWAYS_ON = ['verify', 'scan_cloud']
@@ -6171,7 +6126,7 @@ class SmartRouter:
 
             # Admin indicators
             if any(kw in title for kw in ['admin', 'dashboard', 'panel', 'console', 'management']):
-                matched_modules.update(['dom_xss', 'probe_env', 'cors_check'])
+                matched_modules.update(['probe_env', 'cors_check'])
                 matched_types.add('admin_panel')
                 reasons.append('Admin interface detected in title')
 
@@ -7416,6 +7371,7 @@ def load_custom_rules(filepath: str) -> Dict:
                 'validate': None,
                 'case_sensitive': rule.get('case_sensitive', False),
                 'context_required': rule.get('context_required', False),
+                'preserve_severity': rule.get('preserve_severity', False),
             }
         if rules:
             print(f"{Colors.OKGREEN}[+] Loaded {len(rules)} custom rules "
@@ -7423,6 +7379,65 @@ def load_custom_rules(filepath: str) -> Dict:
     except Exception as e:
         print(f"{Colors.FAIL}[!] Error loading rules: {e}{Colors.ENDC}")
 
+    return rules
+
+
+def load_gitleaks_config(filepath: str) -> Dict:
+    """Load a Gitleaks TOML config as SecretScanner pattern rules.
+
+    Requires tomllib (Python 3.11+) or tomli. Gitleaks regexes, secretGroup
+    and keywords are honored; Gitleaks allowlists are not applied.
+    """
+    rules = {}
+    path = Path(filepath)
+    if not path.exists():
+        print(f"{Colors.FAIL}[!] Gitleaks config not found: {filepath}{Colors.ENDC}")
+        return rules
+    try:
+        import tomllib as toml_mod
+    except ImportError:
+        try:
+            import tomli as toml_mod
+        except ImportError:
+            print(f"{Colors.FAIL}[!] Gitleaks TOML import needs Python 3.11+ "
+                  f"or 'pip install tomli'{Colors.ENDC}")
+            return rules
+    try:
+        data = toml_mod.loads(path.read_text(encoding='utf-8'))
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] Error parsing Gitleaks config: {e}{Colors.ENDC}")
+        return rules
+
+    for rule in data.get('rules', []):
+        rid = rule.get('id')
+        regex = rule.get('regex')
+        if not rid or not regex:
+            continue
+        raw_patterns = regex if isinstance(regex, list) else [regex]
+        compiled_ok = []
+        for pat in raw_patterns:
+            try:
+                re.compile(pat)
+                compiled_ok.append(pat)
+            except re.error as e:
+                print(f"{Colors.WARNING}  [!] Skipping invalid regex in rule "
+                      f"'{rid}': {e}{Colors.ENDC}")
+        if not compiled_ok:
+            continue
+        rules[f"Gitleaks: {rid}"] = {
+            'patterns': compiled_ok,
+            'severity': str(rule.get('severity', 'HIGH')).upper(),
+            'validate': None,
+            'case_sensitive': False,
+            'context_required': False,
+            'secret_group': rule.get('secretGroup', 0),
+            'keywords': rule.get('keywords', []),
+            'preserve_severity': True,
+        }
+
+    if rules:
+        print(f"{Colors.OKGREEN}[+] Loaded {len(rules)} Gitleaks rules "
+              f"from {filepath}{Colors.ENDC}")
     return rules
 
 
@@ -7435,28 +7450,34 @@ def export_sarif(findings: List[Dict], stats: Dict, filename: str):
     rules = {}
     results = []
 
-    for i, f in enumerate(findings):
-        rule_id = f['type'].lower().replace(' ', '-')
+    for f in findings:
+        ftype = str(f.get('type') or f.get('category') or 'Finding')
+        rule_id = re.sub(r'[^a-z0-9]+', '-', ftype.lower()).strip('-') or 'finding'
+        severity = str(f.get('severity', 'INFO')).upper()
+        source = f.get('source') or 'unknown'
+        status = f.get('status', 'potential')
+        ev = f.get('evidence') or {}
+
         if rule_id not in rules:
             rules[rule_id] = {
                 'id': rule_id,
-                'name': f['type'],
-                'shortDescription': {'text': f"Detected {f['type']}"},
+                'name': ftype,
+                'shortDescription': {'text': f"Detected {ftype}"},
                 'defaultConfiguration': {
                     'level': {
                         'CRITICAL': 'error', 'HIGH': 'error',
-                        'MEDIUM': 'warning', 'LOW': 'note',
-                    }.get(f['severity'], 'warning')
+                        'MEDIUM': 'warning', 'LOW': 'note', 'INFO': 'note',
+                    }.get(severity, 'warning')
                 },
                 'properties': {
                     'security-severity': {
                         'CRITICAL': '9.5', 'HIGH': '7.5',
-                        'MEDIUM': '5.0', 'LOW': '2.5',
-                    }.get(f['severity'], '5.0')
+                        'MEDIUM': '5.0', 'LOW': '2.5', 'INFO': '0.0',
+                    }.get(severity, '5.0')
                 },
             }
 
-        val_masked = f['value']
+        val_masked = str(f.get('value', '') or '')
         if len(val_masked) > 12:
             val_masked = val_masked[:6] + '***' + val_masked[-4:]
 
@@ -7464,23 +7485,30 @@ def export_sarif(findings: List[Dict], stats: Dict, filename: str):
             'ruleId': rule_id,
             'level': rules[rule_id]['defaultConfiguration']['level'],
             'message': {
-                'text': f"Found {f['type']} (confidence: {f.get('confidence','?')}, "
-                        f"entropy: {f.get('entropy',0)}) — {val_masked}"
+                'text': f"Found {ftype} [{status}] "
+                        f"(confidence: {f.get('confidence', '?')})"
+                        + (f" — {val_masked}" if val_masked else '')
             },
             'locations': [{
                 'physicalLocation': {
-                    'artifactLocation': {'uri': f['source']},
+                    'artifactLocation': {'uri': source},
                 }
             }],
             'properties': {
+                'status': status,
+                'category': f.get('category', ''),
                 'confidence': f.get('confidence', 'LOW'),
-                'validated': f.get('validated', False),
-                'entropy': f.get('entropy', 0),
+                'validated': ev.get('validated', f.get('validated', False)),
+                'entropy': ev.get('entropy', f.get('entropy', 0)),
+                'fingerprint': f.get('id', ''),
             },
         }
-        if f.get('verified_live') is not None:
-            result['properties']['verified_live'] = f['verified_live']
-            result['properties']['verification_detail'] = f.get('verification_detail', '')
+        verified = f.get('verified_live', ev.get('verified_live'))
+        if verified is not None:
+            result['properties']['verified_live'] = verified
+            result['properties']['verification_detail'] = (
+                f.get('verification_detail')
+                or (f.get('verification') or {}).get('detail', ''))
 
         results.append(result)
 
@@ -7523,7 +7551,7 @@ class SecretScanner:
                  probe_swagger=False, scan_cloud=False,
                  wayback=False, subtko=False, ssrf_probe=False,
                  fuzz_idor=False, cors_check=False, open_redirect=False,
-                 dom_xss=False, dep_confusion=False, jwt_exploit=False,
+                 dep_confusion=False, jwt_exploit=False,
                  cloud_perms=False):
         self.verbose = verbose
         self.max_workers = max_workers
@@ -7541,7 +7569,6 @@ class SecretScanner:
         self.enable_fuzz_idor = fuzz_idor
         self.enable_cors = cors_check
         self.enable_redirect = open_redirect
-        self.enable_dom_xss = dom_xss
         self.enable_dep_confusion = dep_confusion
         self.enable_jwt_exploit = jwt_exploit
         self.enable_cloud_perms = cloud_perms
@@ -7549,6 +7576,8 @@ class SecretScanner:
         self.scope_domains = scope_domains or []
         self.baseline_path = baseline_path
         self.found_secrets: List[Dict] = []
+        self.local_files_scanned = 0
+        self.git_commits_scanned = 0
         self.seen_secrets: Set[str] = set()
         self.scanned_urls: Set[str] = set()
         self.blocked_urls: Set[str] = set()
@@ -7631,7 +7660,6 @@ class SecretScanner:
         self.cors_detector = CORSDetector(self.session, self.rate_limiter, verbose) if cors_check else None
         self.redirect_detector = OpenRedirectDetector(self.session, self.rate_limiter, verbose) if open_redirect else None
         self.cloud_perm_tester = CloudPermissionTester(self.session, self.rate_limiter, verbose) if cloud_perms else None
-        self.dom_xss_mapper = DOMXSSMapper(verbose) if dom_xss else None
 
         self.skip_libraries = [
             'jquery', 'bootstrap', 'angular.min', 'react.production',
@@ -7773,6 +7801,10 @@ class SecretScanner:
                         continue
                     self.blocked_urls.add(url)
                     return None
+                if 400 <= resp.status_code < 500 and resp.status_code != 429:
+                    # Other 4xx are final decisions — retrying only creates a storm.
+                    self.stats['requests_failed'] += 1
+                    return resp
                 resp.raise_for_status()
                 return resp
             except requests.exceptions.RequestException:
@@ -7793,7 +7825,7 @@ class SecretScanner:
         if not self.scope_domains:
             return True
         parsed = urlparse(url)
-        host = parsed.netloc.lower()
+        host = (parsed.hostname or '').lower()
         return any(host == d or host.endswith('.' + d) for d in self.scope_domains)
 
     # ─────────────────────────────────────────────────────────────
@@ -8758,7 +8790,15 @@ class SecretScanner:
             flags = re.MULTILINE if config.get('case_sensitive') else re.IGNORECASE | re.MULTILINE
             for pattern in config['patterns']:
                 for match in re.finditer(pattern, content, flags):
-                    if match.lastindex:
+                    group_idx = config.get('secret_group')
+                    if group_idx is not None:
+                        try:
+                            val = match.group(group_idx)
+                        except (IndexError, re.error):
+                            val = match.group(0)
+                        if not val:
+                            continue
+                    elif match.lastindex:
                         if match.lastindex == 1:
                             val = match.group(1)
                         elif match.lastindex == 3 and 'sentry' in secret_type.lower():
@@ -8770,6 +8810,10 @@ class SecretScanner:
 
                     if val in KNOWN_TEST_KEYS:
                         continue
+                    if config.get('keywords'):
+                        window = content[max(0, match.start() - 200):match.end() + 200].lower()
+                        if not any(k.lower() in window for k in config['keywords']):
+                            continue
                     h = f"{secret_type}:{val}"
                     if h in self.seen_secrets:
                         continue
@@ -8838,6 +8882,8 @@ class SecretScanner:
                         'validated': validated, 'confidence': confidence,
                         'entropy': entropy,
                     }
+                    if config.get('preserve_severity'):
+                        finding['severity_pinned'] = True
                     if jwt_info:
                         finding['jwt_decoded'] = jwt_info
 
@@ -8966,6 +9012,117 @@ class SecretScanner:
         return (js_url, resp.text)
 
     # ═════════════════════════════════════════════════════════════
+    #  Local sources: filesystem + git history
+    # ═════════════════════════════════════════════════════════════
+
+    def scan_local_path(self, path, max_file_bytes=2 * 1024 * 1024):
+        """Scan a local file or directory tree for secrets (no network)."""
+        root = Path(path).expanduser()
+        if not root.exists():
+            print(f"{Colors.FAIL}[!] Path not found: {path}{Colors.ENDC}")
+            return 0
+        skip_dirs = {'.git', '.hg', '.svn', 'node_modules', 'vendor', 'dist',
+                     'build', '.venv', 'venv', '__pycache__', '.tox',
+                     '.mypy_cache', '.pytest_cache'}
+        if root.is_file():
+            files = [root]
+        else:
+            files = []
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+                for name in filenames:
+                    files.append(Path(dirpath) / name)
+
+        scanned = 0
+        skipped = 0
+        for f in files:
+            try:
+                if not f.is_file() or f.stat().st_size > max_file_bytes:
+                    skipped += 1
+                    continue
+                data = f.read_bytes()
+            except OSError:
+                skipped += 1
+                continue
+            if b'\x00' in data[:8192]:
+                skipped += 1
+                continue
+            self.scan_content(data.decode('utf-8', errors='replace'),
+                              f"file://{f.resolve()}")
+            scanned += 1
+            self.local_files_scanned += 1
+
+        extra = f", {skipped} skipped" if skipped else ""
+        print(f"[*] Local path: {scanned} files scanned{extra}")
+        return scanned
+
+    def scan_git_history(self, repo, max_commits=500):
+        """Scan added lines across a local git repository's history."""
+        root = Path(repo).expanduser()
+        if not root.exists():
+            print(f"{Colors.FAIL}[!] Repository path not found: {repo}{Colors.ENDC}")
+            return 0
+        cmd = ['git', '-C', str(root), 'log', '--all', '--no-color',
+               '--no-ext-diff', '--unified=0', '--format=commit %H', '-p']
+        if max_commits and max_commits > 0:
+            cmd += ['--max-count', str(max_commits)]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True,
+                                    errors='replace')
+        except OSError:
+            print(f"{Colors.FAIL}[!] git executable not available{Colors.ENDC}")
+            return 0
+
+        commits = 0
+        current_sha = None
+        current_file = None
+        added: List[str] = []
+
+        def flush():
+            if added and current_file and current_sha:
+                self.scan_content(
+                    '\n'.join(added),
+                    f"git://{root.resolve()}@{current_sha[:12]}:{current_file}",
+                )
+            added.clear()
+
+        try:
+            for line in proc.stdout:
+                if line.startswith('commit '):
+                    flush()
+                    current_sha = line.split(None, 1)[1].strip()
+                    commits += 1
+                    current_file = None
+                elif line.startswith('+++ '):
+                    flush()
+                    target = line[4:].strip()
+                    if target == '/dev/null':
+                        current_file = None
+                    elif target.startswith('b/'):
+                        current_file = target[2:]
+                    else:
+                        current_file = target
+                elif line.startswith('+') and current_file is not None:
+                    added.append(line[1:])
+                elif line.startswith('@@') or line.startswith('diff --git'):
+                    flush()
+            flush()
+        finally:
+            proc.stdout.close()
+            err = proc.stderr.read()
+            proc.stderr.close()
+            proc.wait()
+
+        if proc.returncode != 0:
+            print(f"{Colors.FAIL}[!] Git history scan failed: "
+                  f"{err.strip()[:200]}{Colors.ENDC}")
+            return 0
+        self.git_commits_scanned = commits
+        print(f"[*] Git history: {commits} commits scanned")
+        return commits
+
+    # ═════════════════════════════════════════════════════════════
     #  Scan URL
     # ═════════════════════════════════════════════════════════════
 
@@ -9010,6 +9167,13 @@ class SecretScanner:
 
             # Skip probes on archive.org URLs (pointless + wastes time)
             is_archive_url = 'web.archive.org' in url or 'archive.org' in url
+
+            # v5.2: Exposure modules were previously constructed but never run.
+            if depth == 0 and not is_archive_url:
+                if getattr(self, 'cors_detector', None):
+                    self.cors_detector.test_url(url, urlparse(url).netloc)
+                if getattr(self, 'redirect_detector', None):
+                    self.redirect_detector.scan_url(url)
 
             if depth == 0 and not is_archive_url:
                 self.parse_robots_sitemap(url)
@@ -9604,16 +9768,162 @@ class SecretScanner:
             self.rate_tester.print_results()
 
     # ═════════════════════════════════════════════════════════════
+    #  v5.2: Unified findings model
+    # ═════════════════════════════════════════════════════════════
+
+    SEVERITY_RANK = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3, 'INFO': 4}
+    BLOCKING_STATUSES = {'confirmed', 'potential'}
+
+    def _mk_finding(self, category, ftype, severity, confidence, status,
+                    source, value='', evidence=None, verification=None):
+        key = f"{category}|{ftype}|{source}|{value}"
+        return {
+            'id': hashlib.sha256(key.encode('utf-8', 'ignore')).hexdigest()[:16],
+            'category': category,
+            'type': ftype or 'Unknown',
+            'severity': (severity or 'INFO').upper(),
+            'confidence': confidence or 'LOW',
+            'status': status if status in ('confirmed', 'potential', 'lead') else 'potential',
+            'source': source or '',
+            'value': (value if isinstance(value, str) else str(value))[:500],
+            'evidence': evidence or {},
+            'verification': verification or {},
+            'tool': 'SecretPulse',
+            'version': __version__,
+        }
+
+    def collect_findings(self):
+        """Single source of truth for every module's findings.
+
+        Each entry carries a status tier so unverified signal (IDOR/SSRF/DOM
+        presence checks) is reported as a *lead* instead of a finding.
+        """
+        out = []
+        seen = set()
+
+        def add(f):
+            if f['id'] in seen:
+                return
+            seen.add(f['id'])
+            out.append(f)
+
+        # Secrets — verified-live is confirmed, otherwise potential
+        for s in self.found_secrets:
+            add(self._mk_finding(
+                'secret', s.get('type'), s.get('severity'), s.get('confidence'),
+                'confirmed' if s.get('verified_live') is True else 'potential',
+                s.get('source', ''), s.get('value', ''),
+                evidence={'entropy': s.get('entropy', 0),
+                          'validated': s.get('validated', False),
+                          'verified_live': s.get('verified_live')},
+                verification={'detail': s.get('verification_detail', '')},
+            ))
+
+        # CORS — deterministic header observation
+        for f in (getattr(getattr(self, 'cors_detector', None), 'findings', None) or []):
+            add(self._mk_finding(
+                'cors', f.get('type', 'CORS Misconfiguration'), f.get('severity'),
+                'HIGH', 'confirmed' if f.get('credentials') else 'potential',
+                f.get('url', ''), f.get('detail', ''),
+                evidence={'origin_sent': f.get('origin_sent'),
+                          'acao': f.get('acao'),
+                          'credentials': f.get('credentials')},
+            ))
+
+        # Open redirect — deterministic Location observation
+        for f in (getattr(getattr(self, 'redirect_detector', None), 'findings', None) or []):
+            add(self._mk_finding(
+                'redirect', f.get('type', 'Open Redirect'), f.get('severity'),
+                'HIGH', 'confirmed', f.get('url', ''), f.get('detail', ''),
+                evidence={'param': f.get('param'), 'payload': f.get('payload'),
+                          'status_code': f.get('status_code'),
+                          'location': f.get('location')},
+            ))
+
+        # Cloud-native findings
+        cloud_findings = getattr(getattr(self, 'cloud_scanner', None), 'findings', None) or []
+        for f in cloud_findings:
+            add(self._mk_finding(
+                'cloud', f.get('type'), f.get('severity'), 'MEDIUM',
+                'confirmed', f.get('source', ''), f.get('detail', ''), evidence=f,
+            ))
+
+        # Security header findings
+        for f in (getattr(self.headers_auditor, 'findings', None) or []):
+            label = f"{f.get('header', '')}: {f.get('issue', '')}".strip(': ')
+            add(self._mk_finding(
+                'header', label or 'Security Header Issue', f.get('severity'),
+                'MEDIUM', 'lead', f.get('url', ''),
+                f.get('detail', ''), evidence=f,
+            ))
+
+        # Unverified signals — reported as leads, never as findings
+        for v in (getattr(getattr(self, 'ssrf_prober', None), 'vectors', None) or []):
+            add(self._mk_finding(
+                'ssrf', 'SSRF Indicator (unconfirmed)', v.get('severity', 'INFO'),
+                'LOW', 'lead', v.get('source', ''), v.get('indicator', ''), evidence=v,
+            ))
+        for c in (getattr(getattr(self, 'idor_fuzzer', None), 'idor_candidates', None) or []):
+            add(self._mk_finding(
+                'idor', 'IDOR/BOLA Candidate (unverified)', 'INFO',
+                'LOW', 'lead', c.get('base_url', ''), c.get('url_pattern', ''), evidence=c,
+            ))
+        for ch in (getattr(self, 'attack_chains', None) or []):
+            if not isinstance(ch, dict):
+                continue
+            add(self._mk_finding(
+                'attack_chain', ch.get('type', ch.get('name', 'Attack Chain')),
+                ch.get('severity', 'INFO'), 'LOW', 'lead',
+                ch.get('source', ch.get('url', '')),
+                ch.get('detail', ch.get('description', '')), evidence=ch,
+            ))
+
+        return out
+
+    def get_finding_summary(self):
+        findings = self.collect_findings()
+        by_status, by_sev = defaultdict(int), defaultdict(int)
+        for f in findings:
+            by_status[f['status']] += 1
+            by_sev[f['severity']] += 1
+        return {
+            'total': len(findings),
+            'by_status': dict(by_status),
+            'by_severity': dict(by_sev),
+            'blocking': sum(1 for f in findings if f['status'] in self.BLOCKING_STATUSES),
+        }
+
+    def compute_exit_code(self, fail_on):
+        """CI gate: 1 if confirmed/potential findings meet the severity threshold.
+
+        Leads are intentionally excluded so unverified heuristics never fail a build.
+        """
+        if not fail_on or str(fail_on).lower() == 'none':
+            return 0
+        limit = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'any': 4}.get(
+            str(fail_on).lower())
+        if limit is None:
+            return 0
+        blocking = [f for f in self.collect_findings()
+                    if f['status'] in self.BLOCKING_STATUSES]
+        if not blocking:
+            return 0
+        worst = min(self.SEVERITY_RANK.get(f['severity'], 4) for f in blocking)
+        return 1 if worst <= limit else 0
+
+    # ═════════════════════════════════════════════════════════════
     #  Output — JSON
     # ═════════════════════════════════════════════════════════════
 
     def export_json(self, filename):
+        unified = self.collect_findings()
         output = {
             'tool': f'SecretPulse v{__version__}',
             'author': __author__,
             'scan_time': datetime.now(timezone.utc).isoformat(),
             'urls_scanned': len(self.scanned_urls),
-            'total_findings': len(self.found_secrets),
+            'total_findings': len(unified),
+            'secrets_total': len(self.found_secrets),
             'network_stats': self.stats,
             'findings': self.found_secrets,
             'api_endpoints': self.discovered_endpoints,
@@ -9637,6 +9947,8 @@ class SecretScanner:
             'cve_analysis': self.cve_lookup.get_summary(),
             'rate_abuse': self.rate_tester.get_summary() if self.rate_tester else {},
             'accuracy_engine': self.accuracy_engine.get_stats(),
+            'unified_findings': unified,
+            'finding_summary': self.get_finding_summary(),
         }
         with open(filename, 'w') as f:
             json.dump(output, f, indent=2, default=str)
@@ -9890,6 +10202,28 @@ class SecretScanner:
                               f'{html_lib.escape(cf["type"])} in <code>{html_lib.escape(cf["source"][:60])}</code></li>')
             disc_html += '</ul>'
 
+        # v5.2: Unified exposure findings — module results now reach the report
+        unified = self.collect_findings()
+        module_findings = [f for f in unified if f['category'] != 'secret']
+        if module_findings:
+            stat_c = {'confirmed': '#dc3545', 'potential': '#fd7e14', 'lead': '#6c757d'}
+            disc_html += (f'<h2>Exposure Findings ({len(module_findings)})</h2>'
+                          '<table><tr><th>Severity</th><th>Status</th><th>Category</th>'
+                          '<th>Type</th><th>Source</th><th>Detail</th></tr>')
+            for f in sorted(module_findings,
+                            key=lambda x: self.SEVERITY_RANK.get(x['severity'], 4)):
+                sc = stat_c.get(f['status'], '#6c757d')
+                disc_html += (
+                    f'<tr><td><span class="badge" style="background:'
+                    f'{sev_c.get(f["severity"], "#6c757d")}">{html_lib.escape(f["severity"])}</span></td>'
+                    f'<td><span class="badge" style="background:{sc}">'
+                    f'{html_lib.escape(f["status"])}</span></td>'
+                    f'<td>{html_lib.escape(f["category"])}</td>'
+                    f'<td>{html_lib.escape(f["type"])}</td>'
+                    f'<td class="src">{html_lib.escape(f["source"][:80])}</td>'
+                    f'<td>{html_lib.escape(f["value"][:140])}</td></tr>')
+            disc_html += '</table>'
+
         now = datetime.now(timezone.utc)
         html_out = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -10055,6 +10389,7 @@ Examples:
     parser.add_argument('--rate-limit', type=float, default=0, help='Requests per second (0=unlimited)')
     parser.add_argument('--scope', help='Scope file (one domain per line)')
     parser.add_argument('--rules', help='Custom rules file (YAML or JSON)')
+    parser.add_argument('--gitleaks-config', help='Import Gitleaks TOML rules')
     parser.add_argument('--no-progress', action='store_true')
     parser.add_argument('--scan-cloud', action='store_true', help='Cloud native scanning (AWS/K8s/GCP)')
     parser.add_argument('--notify', help='Webhook URL (Slack/Discord/Teams)')
@@ -10067,10 +10402,13 @@ Examples:
     parser.add_argument('--attack-chains', action='store_true', help='Map risk impact chains with exploitability scoring')
     # v5.0: New features
     parser.add_argument('-L', '--target-list', help='File with target URLs (one per line), use - for stdin')
+    parser.add_argument('--path', help='Scan a local file or directory for secrets')
+    parser.add_argument('--git', help='Scan a local git repository history for secrets')
+    parser.add_argument('--git-max-commits', type=int, default=500,
+                        help='Max commits to inspect with --git (0 = all)')
     parser.add_argument('--report', choices=['html', 'pdf', 'both'], help='Generate visual report (html/pdf/both)')
     parser.add_argument('--rate-abuse', action='store_true', help='Check rate limit protection on verified keys (safe mode)')
     parser.add_argument('--cve-lookup', action='store_true', help='CVE lookup for source map npm packages')
-    parser.add_argument('--resume', action='store_true', help='Resume interrupted batch scan')
     # Phase 1: Recon & Infrastructure
     parser.add_argument('--recon', action='store_true', help='Run subdomain recon (CT logs + DNS + risk scoring)')
     parser.add_argument('--recon-only', action='store_true', help='Only run recon, do not scan')
@@ -10078,12 +10416,13 @@ Examples:
     parser.add_argument('--db', action='store_true', help='Enable SQLite persistence (incremental scanning)')
     parser.add_argument('--db-stats', action='store_true', help='Show database statistics and exit')
     parser.add_argument('--db-history', action='store_true', help='Show scan history and exit')
-    parser.add_argument('--incremental', action='store_true', help='Skip unchanged URLs (requires --db)')
     parser.add_argument('--diff', action='store_true', help='Show delta vs previous scan (requires --db)')
+    parser.add_argument('--fail-on', choices=['none', 'critical', 'high', 'medium', 'low', 'any'],
+                        default='none',
+                        help='Exit 1 when confirmed/potential findings meet this severity (CI gate)')
     # v6.0: Exposure scanning
     parser.add_argument('--cors-check', action='store_true', help='Test for CORS misconfigurations')
     parser.add_argument('--open-redirect', action='store_true', help='Test for open redirect vulnerabilities')
-    parser.add_argument('--dom-xss', action='store_true', help='Map DOM XSS sources and sinks in JS')
     parser.add_argument('--dep-confusion', action='store_true', help='Check npm packages for dependency confusion')
     parser.add_argument('--jwt-exploit', action='store_true', help='Deep JWT exploitation testing')
     parser.add_argument('--cloud-perms', action='store_true', help='Test cloud resource permissions (S3/GCS/Firebase)')
@@ -10122,7 +10461,6 @@ Examples:
         args.db = True
         args.cors_check = True
         args.open_redirect = True
-        args.dom_xss = True
         args.dep_confusion = True
         args.jwt_exploit = True
         args.cloud_perms = True
@@ -10172,7 +10510,8 @@ Examples:
         CICDIntegration.generate_pre_commit_hook()
         return
 
-    if not args.urls and not getattr(args, 'key', None) and not args.target_list:
+    if (not args.urls and not getattr(args, 'key', None) and not args.target_list
+            and not args.path and not args.git):
         parser.print_help()
         return
 
@@ -10199,11 +10538,13 @@ Examples:
                 if args.verbose:
                     print(f"{Colors.WARNING}  [!] Rejected invalid target: {url}{Colors.ENDC}")
                 return None
-            # Reject localhost/internal by default (unless --scope allows it)
-            if parsed.netloc in ('localhost', '127.0.0.1', '0.0.0.0'):
-                if args.verbose:
-                    print(f"{Colors.WARNING}  [!] Rejected localhost target: {url}{Colors.ENDC}")
-                return None
+            # Reject loopback/internal targets by default (unless --scope allows it)
+            host = (parsed.hostname or '').lower()
+            if host in ('localhost', '127.0.0.1', '0.0.0.0', '::1') or host.endswith('.localhost'):
+                if not any(host == d or host.endswith('.' + d) for d in scope_domains):
+                    if args.verbose:
+                        print(f"{Colors.WARNING}  [!] Rejected localhost target: {url}{Colors.ENDC}")
+                    return None
         except Exception:
             return None
         return url
@@ -10223,6 +10564,9 @@ Examples:
     custom_rules = None
     if args.rules:
         custom_rules = load_custom_rules(args.rules)
+    if args.gitleaks_config:
+        custom_rules = custom_rules or {}
+        custom_rules.update(load_gitleaks_config(args.gitleaks_config))
 
     # Initialize database if requested
     db = SecretPulseDB() if args.db else None
@@ -10240,7 +10584,7 @@ Examples:
         wayback=args.wayback, subtko=args.subtko,
         ssrf_probe=args.ssrf_probe, fuzz_idor=args.fuzz_idor,
         cors_check=args.cors_check, open_redirect=args.open_redirect,
-        dom_xss=args.dom_xss, dep_confusion=args.dep_confusion,
+        dep_confusion=args.dep_confusion,
         jwt_exploit=args.jwt_exploit, cloud_perms=args.cloud_perms,
     )
 
@@ -10277,11 +10621,18 @@ Examples:
             elif args.verbose:
                 print(f"{Colors.WARNING}[!] Skipping invalid target: '{raw_url}'{Colors.ENDC}")
 
-    if not urls_to_scan:
+    local_scan_requested = bool(args.path or args.git)
+    if not urls_to_scan and not local_scan_requested:
         print(f"{Colors.FAIL}[!] No valid targets to scan{Colors.ENDC}")
         return
 
-    print(f"[*] Targets: {len(urls_to_scan)}")
+    if urls_to_scan:
+        print(f"[*] Targets: {len(urls_to_scan)}")
+    if args.path:
+        print(f"[*] Local path: {args.path}")
+    if args.git:
+        commit_cap = args.git_max_commits if args.git_max_commits > 0 else 'all'
+        print(f"[*] Git history: {args.git} (max {commit_cap} commits)")
     if args.depth:
         print(f"[*] Crawl depth: {args.depth}")
     print(f"[*] Workers: {args.workers} · Retries: {args.retries}")
@@ -10321,14 +10672,10 @@ Examples:
         print(f"[*] Subdomain recon: ON (CT logs + DNS + risk scoring)")
     if args.db:
         print(f"[*] SQLite persistence: ON (~/.SecretPulse/SecretPulse.db)")
-    if args.incremental:
-        print(f"[*] Incremental mode: ON (skip unchanged URLs)")
     if args.cors_check:
         print(f"[*] CORS check: ON")
     if args.open_redirect:
         print(f"[*] Open redirect check: ON")
-    if args.dom_xss:
-        print(f"[*] DOM XSS mapping: ON")
     if args.dep_confusion:
         print(f"[*] Dependency confusion check: ON")
     if args.jwt_exploit:
@@ -10399,11 +10746,16 @@ Examples:
             'verify': args.verify, 'recon': args.recon,
             'smart': args.smart,
         }
-        target_str = urls_to_scan[0] if urls_to_scan else 'unknown'
+        target_str = urls_to_scan[0] if urls_to_scan else (args.git or args.path or 'local')
         scan_id = db.start_scan(target_str, config)
 
     scanner.progress.set_total(len(urls_to_scan))
     start = time.time()
+
+    if args.path:
+        scanner.scan_local_path(args.path)
+    if args.git:
+        scanner.scan_git_history(args.git, args.git_max_commits)
 
     for url in urls_to_scan:
         if not url.startswith(('http://', 'https://')):
@@ -10419,7 +10771,6 @@ Examples:
             scanner.enable_fuzz_idor = 'fuzz_idor' in active_modules
             scanner.enable_cors = 'cors_check' in active_modules
             scanner.enable_redirect = 'open_redirect' in active_modules
-            scanner.enable_dom_xss = 'dom_xss' in active_modules
             scanner.enable_cloud_perms = 'cloud_perms' in active_modules
             scanner.enable_jwt_exploit = 'jwt_exploit' in active_modules
             scanner.enable_dep_confusion = 'dep_confusion' in active_modules
@@ -10428,8 +10779,6 @@ Examples:
                 scanner.cors_detector = CORSDetector(scanner.session, scanner.rate_limiter, scanner.verbose)
             if scanner.enable_redirect and not getattr(scanner, 'redirect_detector', None):
                 scanner.redirect_detector = OpenRedirectDetector(scanner.session, scanner.rate_limiter, scanner.verbose)
-            if scanner.enable_dom_xss and not getattr(scanner, 'dom_xss_mapper', None):
-                scanner.dom_xss_mapper = DOMXSSMapper(scanner.verbose)
             if scanner.enable_cloud_perms and not getattr(scanner, 'cloud_perm_tester', None):
                 scanner.cloud_perm_tester = CloudPermissionTester(scanner.session, scanner.rate_limiter, scanner.verbose)
 
@@ -10624,11 +10973,6 @@ Examples:
     if getattr(scanner, 'redirect_detector', None) and scanner.redirect_detector.findings:
         exposure_items.append(f"Open redirects: {len(scanner.redirect_detector.findings)}")
 
-    # DOM XSS results
-    if getattr(scanner, 'dom_xss_mapper', None) and scanner.dom_xss_mapper.findings:
-        xss_crit = sum(1 for f in scanner.dom_xss_mapper.findings if f['severity'] == 'CRITICAL')
-        exposure_items.append(f"DOM XSS vectors: {len(scanner.dom_xss_mapper.findings)} ({xss_crit} critical)")
-
     # Cloud permissions
     if getattr(scanner, 'cloud_perm_tester', None) and scanner.cloud_perm_tester.findings:
         exposure_items.append(f"Cloud misconfigs: {len(scanner.cloud_perm_tester.findings)}")
@@ -10697,10 +11041,15 @@ Examples:
                 print(f"     {Colors.DIM}Modules: {modules_str}{Colors.ENDC}")
 
     # ── DB: Save findings and finalize ──
+    prev_scan = None
+    if db and scan_id and getattr(args, 'diff', False):
+        # Snapshot the previous scan BEFORE this scan is marked complete.
+        target_domain = urlparse(urls_to_scan[0]).netloc if urls_to_scan else (args.git or args.path or 'local')
+        prev_scan = db.get_previous_scan_data(target_domain)
     if db and scan_id:
         for finding in scanner.found_secrets:
             db.save_finding(scan_id, finding)
-        db.finish_scan(scan_id, len(scanner.scanned_urls),
+        db.finish_scan(scan_id, len(scanner.scanned_urls) + scanner.local_files_scanned,
                        len(scanner.found_secrets), elapsed)
         db_stats = db.get_stats()
         print(f"\n{Colors.DIM}[DB] Scan #{scan_id} saved | "
@@ -10708,9 +11057,8 @@ Examples:
               f"{db_stats['total_scans']} scans{Colors.ENDC}")
 
         # v5.1.1: Differential scan — compare with previous scan
-        if hasattr(args, 'diff') and args.diff:
-            target_domain = urlparse(urls_to_scan[0]).netloc if urls_to_scan else ''
-            prev = db.get_previous_scan_data(target_domain)
+        if getattr(args, 'diff', False):
+            prev = prev_scan
             if prev and prev.get('scan_id') and prev['scan_id'] != scan_id:
                 print(f"\n{Colors.BOLD}📊 DIFFERENTIAL SCAN (vs scan #{prev['scan_id']}):{Colors.ENDC}")
                 # New findings
@@ -10756,7 +11104,7 @@ Examples:
     if args.html:
         scanner.export_html(args.html)
     if args.sarif:
-        export_sarif(scanner.found_secrets, scanner.stats, args.sarif)
+        export_sarif(scanner.collect_findings(), scanner.stats, args.sarif)
 
     # v5.0: Enhanced report generation
     if args.report:
@@ -10776,6 +11124,19 @@ Examples:
     if scanner.notifier:
         target = urls_to_scan[0] if urls_to_scan else 'unknown'
         scanner.notifier.send_alert(scanner.found_secrets, scanner.stats, target)
+
+    # v5.2: CI exit gate — only confirmed/potential findings count; leads never fail.
+    if getattr(args, 'fail_on', 'none') != 'none':
+        summary = scanner.get_finding_summary()
+        code = scanner.compute_exit_code(args.fail_on)
+        if code:
+            print(f"{Colors.FAIL}[!] Failing build: {summary['blocking']} "
+                  f"confirmed/potential finding(s) meet --fail-on "
+                  f"{args.fail_on}{Colors.ENDC}")
+        else:
+            print(f"{Colors.OKGREEN}[+] Exit 0: no confirmed/potential findings "
+                  f"at or above {args.fail_on}{Colors.ENDC}")
+        sys.exit(code)
 
 
 def _print_upgrade_banner():
