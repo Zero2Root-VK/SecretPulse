@@ -85,9 +85,9 @@ try:
 except ImportError:
     HAS_ASYNC = False
 
-__version__ = '5.3.0'
+__version__ = '5.4.0'
 __author__  = 'Vinod Kumar Bontha'
-__lines__   = '11,300+'
+__lines__   = '11,600+'
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -2210,13 +2210,38 @@ class AccuracyEngine:
             'Google API Key':       (['AIza'], 35, 45),
             'Twilio API Key':       (['SK'], 32, 34),
             'Shopify Access Token': (['shpat_', 'shpca_', 'shppa_'], 20, 60),
-            'OpenAI API Key':       (['sk-'], 40, 60),
+            'OpenAI API Key':       (['sk-'], 40, 220),
             'Anthropic API Key':    (['sk-ant-'], 40, 120),
             'Mapbox Token':         (['pk.eyJ', 'sk.eyJ'], 80, 200),
             'Square Access Token':  (['sq0atp-', 'sq0csp-'], 20, 60),
             'Telegram Bot Token':   ([], 40, 50),  # format: digits:alphanum
             'Private Key':          (['-----BEGIN'], 100, 5000),
             'Firebase Config':      (['AIza'], 35, 45),
+            # v5.4: 2026 provider formats
+            'OpenRouter API Key':   (['sk-or-v1-'], 73, 73),
+            'Groq API Key':         (['gsk_'], 52, 52),
+            'xAI API Key':          (['xai-'], 84, 84),
+            'Perplexity API Key':   (['pplx-'], 53, 53),
+            'Mistral API Key':      ([], 32, 32),
+            'DeepSeek API Key':     (['sk-'], 35, 35),
+            'Together API Key':     ([], 64, 64),
+            'Supabase Secret Key':  (['sb_secret_'], 30, 100),
+            'Resend API Key':       (['re_'], 20, 80),
+            'Postman API Key':      (['PMAK-'], 64, 64),
+            'Pulumi Access Token':  (['pul-'], 44, 44),
+            'Sentry User Token':    (['sntryu_'], 71, 71),
+            'Datadog API Key':      ([], 32, 32),
+            'Databricks API Token': (['dapi'], 36, 40),
+            'Doppler API Token':    (['dp.pt.'], 49, 49),
+            'Fly.io Access Token':  (['fo1_'], 47, 47),
+            'Slack App Token':      (['xapp-'], 30, 80),
+            'Discord Webhook':      (['https://discord.com/api/webhooks/'], 90, 200),
+            '1Password Service Account Token': (['ops_'], 250, 400),
+            'Age Secret Key':       (['AGE-SECRET-KEY-1'], 74, 74),
+            'AWS Bedrock API Key':  (['ABSK'], 113, 280),
+            'AWS Secret Access Key': ([], 40, 40),
+            'Google OAuth Client Secret': (['GOCSPX-'], 35, 35),
+            'Azure AD Client Secret': ([], 35, 45),
         }
 
         f_format = 20  # default: only high entropy match
@@ -3960,17 +3985,17 @@ class InternalAPIEnumerator:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  VALIDATION v2.0: 50 Live API Verifiers — v4.0
+#  VALIDATION v2.0: 66 Read-Only API Verifier Routes — v5.4
 # ═══════════════════════════════════════════════════════════════════
 
 class ActiveVerifierV2(ActiveVerifier):
-    """Extended verifier with 50 API validation methods."""
+    """Extended verifier with 66 read-only API validation routes."""
 
     def __init__(self, session):
         super().__init__(session)
 
     def verify(self, secret_type: str, value: str) -> Optional[Dict]:
-        """Route to appropriate verifier — 50+ types."""
+        """Route to appropriate verifier — 60+ provider types."""
         dispatch = {
             # Original 15 from v2.9
             'Google API Key': lambda v: self.verify_google_maps(v),
@@ -4026,6 +4051,21 @@ class ActiveVerifierV2(ActiveVerifier):
             'OAuth Access Token': lambda v: self.verify_oauth_token(v),
             'OAuth Refresh Token': lambda v: self.verify_oauth_token(v),
             'Firebase Auth': lambda v: self.verify_firebase_auth(v),
+            # v5.4: 2026 provider checks (all read-only GETs)
+            'OpenRouter API Key': lambda v: self.verify_openrouter(v),
+            'Groq API Key': lambda v: self.verify_groq(v),
+            'xAI API Key': lambda v: self.verify_xai(v),
+            'Mistral API Key': lambda v: self.verify_mistral(v),
+            'DeepSeek API Key': lambda v: self.verify_deepseek(v),
+            'Together API Key': lambda v: self.verify_together(v),
+            'Resend API Key': lambda v: self.verify_resend(v),
+            'Postman API Key': lambda v: self.verify_postman(v),
+            'Pulumi Access Token': lambda v: self.verify_pulumi(v),
+            'Sentry User Token': lambda v: self.verify_sentry_user(v),
+            'Datadog API Key': lambda v: self.verify_datadog(v),
+            'Telegram Bot Token': lambda v: self.verify_telegram(v),
+            'Discord Webhook': lambda v: self.verify_discord_webhook(v),
+            'Mailchimp API Key': lambda v: self.verify_mailchimp(v),
         }
         fn = dispatch.get(secret_type)
         if fn:
@@ -4142,6 +4182,162 @@ class ActiveVerifierV2(ActiveVerifier):
                 return {'live': True, 'role': payload.get('role', '?'), 'iss': payload.get('iss', '?')}
             return {'live': False}
         except Exception: return {'live': False}
+
+    def _verify_models_endpoint(self, url, key, provider):
+        """Validate a bearer key against a read-only OpenAI-compatible models endpoint."""
+        try:
+            r = self.session.get(url, headers={'Authorization': f'Bearer {key}'}, timeout=8)
+            if r.status_code == 200:
+                try:
+                    payload = r.json()
+                    models = payload if isinstance(payload, list) else payload.get('data', [])
+                    detail = f'{provider} key is ACTIVE'
+                    if models:
+                        detail += f' ({len(models)} models visible)'
+                    return {'live': True, 'detail': detail}
+                except Exception:
+                    return {'live': True, 'detail': f'{provider} key is ACTIVE'}
+            if r.status_code == 401:
+                return {'live': False, 'detail': f'{provider} key invalid or revoked'}
+            return {'live': None, 'detail': f'{provider} HTTP {r.status_code}'}
+        except Exception as e:
+            return {'live': None, 'detail': str(e)}
+
+    def verify_openrouter(self, key, **kw):
+        try:
+            r = self.session.get('https://openrouter.ai/api/v1/key',
+                                  headers={'Authorization': f'Bearer {key}'}, timeout=8)
+            if r.status_code == 200:
+                data = r.json().get('data', {})
+                label = data.get('label') or data.get('name') or 'key'
+                usage = data.get('usage')
+                detail = f'OpenRouter key is ACTIVE ({label})'
+                if usage is not None:
+                    detail += f' — usage {usage}'
+                return {'live': True, 'detail': detail}
+            if r.status_code == 401:
+                return {'live': False, 'detail': 'OpenRouter key invalid or revoked'}
+            return {'live': None, 'detail': f'OpenRouter HTTP {r.status_code}'}
+        except Exception as e:
+            return {'live': None, 'detail': str(e)}
+
+    def verify_groq(self, key, **kw):
+        return self._verify_models_endpoint(
+            'https://api.groq.com/openai/v1/models', key, 'Groq')
+
+    def verify_xai(self, key, **kw):
+        return self._verify_models_endpoint(
+            'https://api.x.ai/v1/models', key, 'xAI')
+
+    def verify_mistral(self, key, **kw):
+        return self._verify_models_endpoint(
+            'https://api.mistral.ai/v1/models', key, 'Mistral')
+
+    def verify_deepseek(self, key, **kw):
+        return self._verify_models_endpoint(
+            'https://api.deepseek.com/models', key, 'DeepSeek')
+
+    def verify_together(self, key, **kw):
+        return self._verify_models_endpoint(
+            'https://api.together.xyz/v1/models', key, 'Together')
+
+    def verify_resend(self, key, **kw):
+        try:
+            r = self.session.get('https://api.resend.com/api-keys',
+                                  headers={'Authorization': f'Bearer {key}'}, timeout=8)
+            if r.status_code == 200:
+                try:
+                    keys = r.json().get('data', [])
+                    return {'live': True, 'detail': f'Resend key is ACTIVE ({len(keys)} keys visible)'}
+                except Exception:
+                    return {'live': True, 'detail': 'Resend key is ACTIVE'}
+            if r.status_code == 401:
+                return {'live': False, 'detail': 'Resend key invalid or revoked'}
+            return {'live': None, 'detail': f'Resend HTTP {r.status_code}'}
+        except Exception as e:
+            return {'live': None, 'detail': str(e)}
+
+    def verify_postman(self, key, **kw):
+        try:
+            r = self.session.get('https://api.getpostman.com/me',
+                                  headers={'X-Api-Key': key}, timeout=8)
+            if r.status_code == 200:
+                data = r.json().get('user', {})
+                return {'live': True, 'detail': f"Postman user: {data.get('username', '?')}"}
+            if r.status_code == 401:
+                return {'live': False, 'detail': 'Postman key invalid or revoked'}
+            return {'live': None, 'detail': f'Postman HTTP {r.status_code}'}
+        except Exception as e:
+            return {'live': None, 'detail': str(e)}
+
+    def verify_pulumi(self, key, **kw):
+        try:
+            r = self.session.get('https://api.pulumi.com/api/user',
+                                  headers={'Authorization': f'token {key}'}, timeout=8)
+            if r.status_code == 200:
+                data = r.json()
+                return {'live': True, 'detail': f"Pulumi user: {data.get('githubLogin', '?')}"}
+            if r.status_code == 401:
+                return {'live': False, 'detail': 'Pulumi token invalid or revoked'}
+            return {'live': None, 'detail': f'Pulumi HTTP {r.status_code}'}
+        except Exception as e:
+            return {'live': None, 'detail': str(e)}
+
+    def verify_sentry_user(self, key, **kw):
+        try:
+            r = self.session.get('https://sentry.io/api/0/organizations/',
+                                  headers={'Authorization': f'Bearer {key}'}, timeout=8)
+            if r.status_code == 200:
+                try:
+                    orgs = r.json()
+                    return {'live': True, 'detail': f'Sentry token is ACTIVE ({len(orgs)} orgs visible)'}
+                except Exception:
+                    return {'live': True, 'detail': 'Sentry token is ACTIVE'}
+            if r.status_code == 401:
+                return {'live': False, 'detail': 'Sentry token invalid or revoked'}
+            return {'live': None, 'detail': f'Sentry HTTP {r.status_code}'}
+        except Exception as e:
+            return {'live': None, 'detail': str(e)}
+
+    def verify_telegram(self, key, **kw):
+        try:
+            r = self.session.get(f'https://api.telegram.org/bot{key}/getMe', timeout=8)
+            data = r.json() if r.headers.get('content-type', '').startswith('application/json') else {}
+            if r.status_code == 200 and data.get('ok'):
+                bot = data.get('result', {})
+                return {'live': True, 'detail': f"Telegram bot: @{bot.get('username', '?')}"}
+            if r.status_code in (401, 404):
+                return {'live': False, 'detail': 'Telegram bot token invalid or revoked'}
+            return {'live': None, 'detail': f'Telegram HTTP {r.status_code}'}
+        except Exception as e:
+            return {'live': None, 'detail': str(e)}
+
+    def verify_discord_webhook(self, url, **kw):
+        try:
+            r = self.session.get(url, timeout=8)
+            if r.status_code == 200:
+                data = r.json()
+                return {'live': True, 'detail': f"Discord webhook: {data.get('name', '?')}"}
+            if r.status_code in (401, 404):
+                return {'live': False, 'detail': 'Discord webhook invalid or revoked'}
+            return {'live': None, 'detail': f'Discord HTTP {r.status_code}'}
+        except Exception as e:
+            return {'live': None, 'detail': str(e)}
+
+    def verify_mailchimp(self, key, **kw):
+        m = re.search(r'-us(\d{1,2})$', key)
+        if not m:
+            return {'live': None, 'detail': 'Mailchimp data center unavailable'}
+        try:
+            r = self.session.get(f'https://us{m.group(1)}.api.mailchimp.com/3.0/ping',
+                                  auth=('SecretPulse', key), timeout=8)
+            if r.status_code == 200:
+                return {'live': True, 'detail': 'Mailchimp key is ACTIVE'}
+            if r.status_code == 401:
+                return {'live': False, 'detail': 'Mailchimp key invalid or revoked'}
+            return {'live': None, 'detail': f'Mailchimp HTTP {r.status_code}'}
+        except Exception as e:
+            return {'live': None, 'detail': str(e)}
 
     def verify_gitlab(self, key, **kw):
         try:
@@ -7689,7 +7885,7 @@ class SecretScanner:
             'Connection': 'keep-alive',
         })
 
-        # Active verifier — v4.0: 50 verifiers
+        # Active verifier — v5.4: 66 read-only verification routes
         self.verifier = ActiveVerifierV2(self.session) if verify_live else None
 
         # v3.0: API Discovery, Notifier
@@ -8037,7 +8233,7 @@ class SecretScanner:
             },
             'Mailgun API Key': {
                 'patterns': [r'(key-[0-9a-zA-Z]{32})'],
-                'severity': 'HIGH', 'validate': None,
+                'severity': 'HIGH', 'validate': None, 'case_sensitive': True,
             },
 
             # ── Misc ────────────────────────────────────────────────
@@ -8113,7 +8309,10 @@ class SecretScanner:
             #  v4.0 NEW: AI / ML Platform API Keys
             # ═══════════════════════════════════════════════════════
             'OpenAI API Key': {
-                'patterns': [r'(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})', r'(sk-proj-[A-Za-z0-9_\-]{40,})'],
+                'patterns': [
+                    r'(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})',
+                    r'(sk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{40,})',
+                ],
                 'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
             },
             'Anthropic API Key': {
@@ -8201,7 +8400,12 @@ class SecretScanner:
             #  v4.0 NEW: CI/CD & DevOps
             # ═══════════════════════════════════════════════════════
             'GitLab Token': {
-                'patterns': [r'(glpat-[A-Za-z0-9\-_]{20,})'],
+                'patterns': [
+                    r'(glpat-[A-Za-z0-9\-_]{20,})',
+                    r'(glcbt-[0-9A-Za-z]{1,5}_[0-9A-Za-z_-]{20})',
+                    r'(gldt-[0-9A-Za-z_-]{20})',
+                    r'(glrt-[0-9A-Za-z_-]{20})',
+                ],
                 'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
             },
             'Bitbucket App Password': {
@@ -8332,6 +8536,192 @@ class SecretScanner:
                 'severity': 'HIGH', 'validate': None, 'case_sensitive': True,
                 'context_required': True,
             },
+
+            # ═══════════════════════════════════════════════════════
+            #  v5.4: 2026 AI / inference providers
+            # ═══════════════════════════════════════════════════════
+            'OpenRouter API Key': {
+                'patterns': [r'\b(sk-or-v1-[a-f0-9]{64})\b'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'Groq API Key': {
+                'patterns': [r'\b(gsk_[A-Za-z0-9]{48})\b'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'xAI API Key': {
+                'patterns': [r'\b(xai-[A-Za-z0-9]{80})\b'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'Perplexity API Key': {
+                'patterns': [r'\b(pplx-[A-Za-z0-9]{48})\b'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'Mistral API Key': {
+                'patterns': [
+                    r'(?i)(?:MISTRAL_API_KEY|MISTRAL_KEY|mistral[_-]?api[_-]?key)'
+                    r'["\']?\s*[:\=]\s*["\']?([A-Za-z0-9]{32})["\']?',
+                ],
+                'severity': 'HIGH', 'validate': None,
+            },
+            'DeepSeek API Key': {
+                'patterns': [
+                    r'(?i)(?:DEEPSEEK_API_KEY|deepseek[_-]?api[_-]?key)'
+                    r'["\']?\s*[:\=]\s*["\']?(sk-[a-f0-9]{32})["\']?',
+                ],
+                'severity': 'CRITICAL', 'validate': None,
+            },
+            'Together API Key': {
+                'patterns': [
+                    r'(?i)(?:TOGETHER_API_KEY|TOGETHER_KEY|together[_-]?api[_-]?key)'
+                    r'["\']?\s*[:\=]\s*["\']?([a-f0-9]{64})["\']?',
+                ],
+                'severity': 'CRITICAL', 'validate': None,
+            },
+
+            # ═══════════════════════════════════════════════════════
+            #  v5.4: 2026 developer / data platforms
+            # ═══════════════════════════════════════════════════════
+            'Supabase Secret Key': {
+                'patterns': [r'\b(sb_secret_[A-Za-z0-9_-]{20,})\b'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'Resend API Key': {
+                'patterns': [r'\b(re_[A-Za-z0-9]{24,})\b'],
+                'severity': 'HIGH', 'validate': None, 'case_sensitive': True,
+                'context_required': True,
+            },
+            'Postman API Key': {
+                'patterns': [r'\b(PMAK-[a-f0-9]{24}-[a-f0-9]{34})\b'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'Pulumi Access Token': {
+                'patterns': [r'\b(pul-[a-f0-9]{40})\b'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'Sentry User Token': {
+                'patterns': [r'\b(sntryu_[a-f0-9]{64})\b'],
+                'severity': 'HIGH', 'validate': None, 'case_sensitive': True,
+            },
+            'Sentry Org Token': {
+                'patterns': [
+                    r'\b(sntrys_eyJpYXQiO[a-zA-Z0-9+/]{10,200}'
+                    r'(?:LCJyZWdpb25fdXJs|InJlZ2lvbl91cmwi|cmVnaW9uX3VybCI6)'
+                    r'[a-zA-Z0-9+/]{10,200}={0,2}_[a-zA-Z0-9+/]{43})',
+                ],
+                'severity': 'HIGH', 'validate': None,
+            },
+            'Datadog API Key': {
+                'patterns': [
+                    r'(?i)(?:DATADOG_API_KEY|DD_API_KEY|DD_APP_KEY)'
+                    r'["\']?\s*[:\=]\s*["\']?([a-f0-9]{32})["\']?',
+                ],
+                'severity': 'HIGH', 'validate': None,
+            },
+            'Databricks API Token': {
+                'patterns': [r'\b(dapi[a-f0-9]{32}(?:-\d)?)\b'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'Doppler API Token': {
+                'patterns': [r'\b(dp\.pt\.[A-Za-z0-9]{43})\b'],
+                'severity': 'CRITICAL', 'validate': None,
+            },
+            'Fly.io Access Token': {
+                'patterns': [r'\b(fo1_[\w-]{43})\b'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+
+            # ═══════════════════════════════════════════════════════
+            #  v5.4: CI/CD, collaboration, and webhooks
+            # ═══════════════════════════════════════════════════════
+            'Slack App Token': {
+                'patterns': [r'\b(xapp-\d-[A-Z0-9]+-\d+-[a-z0-9]+)\b'],
+                'severity': 'HIGH', 'validate': None,
+            },
+            'Telegram Bot Token': {
+                'patterns': [
+                    r'(?i)(?:TELEGRAM_BOT_TOKEN|BOT_TOKEN|telegram)'
+                    r'["\']?\s*[:\=]\s*["\']?([0-9]{5,16}:[A-Za-z0-9_-]{34})["\']?',
+                    r'\b([0-9]{8,10}:[A-Za-z0-9_-]{35})\b',
+                ],
+                'severity': 'HIGH', 'validate': None,
+            },
+            'Discord Webhook': {
+                'patterns': [
+                    r'(https://(?:discord|discordapp)\.com/api/webhooks/'
+                    r'[0-9]{17,20}/[A-Za-z0-9_-]{60,})',
+                ],
+                'severity': 'HIGH', 'validate': None,
+            },
+            'Microsoft Teams Webhook': {
+                'patterns': [
+                    r'(https://[a-z0-9]+\.webhook\.office\.com/webhookb2/'
+                    r'[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}@'
+                    r'[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}/'
+                    r'IncomingWebhook/[a-z0-9]{32}/'
+                    r'[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12})',
+                ],
+                'severity': 'HIGH', 'validate': None,
+            },
+            'Atlassian API Token': {
+                'patterns': [
+                    r'\b(ATATT3[A-Za-z0-9_\-=]{186})\b',
+                    r'(?i)(?:atlassian|confluence|jira)(?:[ \t\w.-]{0,20})'
+                    r'[\s\'"]{0,3}(?:=|>|:{1,3}=|\|\||:|=>|\?=|,)[\x60\'"\s=]{0,5}'
+                    r'([a-z0-9]{20}[a-f0-9]{4})(?:[\x60\'"\s;]|\\[nr]|$)',
+                ],
+                'severity': 'CRITICAL', 'validate': None,
+            },
+            'Mailchimp API Key': {
+                'patterns': [
+                    r'\b([a-f0-9]{32}-us\d{1,2})\b',
+                    r'(?i)(?:mailchimp|MAILCHIMP_API_KEY)(?:[ \t\w.-]{0,20})'
+                    r'["\']?\s*[:\=]\s*["\']?([a-f0-9]{32}-us\d{1,2})["\']?',
+                ],
+                'severity': 'HIGH', 'validate': None,
+            },
+
+            # ═══════════════════════════════════════════════════════
+            #  v5.4: infrastructure and long-lived credentials
+            # ═══════════════════════════════════════════════════════
+            '1Password Service Account Token': {
+                'patterns': [r'\b(ops_eyJ[A-Za-z0-9+/]{250,}={0,3})'],
+                'severity': 'CRITICAL', 'validate': None,
+            },
+            'Age Secret Key': {
+                'patterns': [
+                    r'\b(AGE-SECRET-KEY-1[QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L]{58})\b',
+                ],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'AWS Bedrock API Key': {
+                'patterns': [r'\b(ABSK[A-Za-z0-9+/]{109,269}={0,2})'],
+                'severity': 'CRITICAL', 'validate': None, 'case_sensitive': True,
+            },
+            'AWS Secret Access Key': {
+                'patterns': [
+                    r'(?i)(?:AWS_SECRET_ACCESS_KEY|AWS_SECRET_KEY|aws_secret_access_key)'
+                    r'["\']?\s*[:\=]\s*["\']?([A-Za-z0-9/+=]{40})["\']?',
+                ],
+                'severity': 'CRITICAL', 'validate': None,
+            },
+            'Google OAuth Client Secret': {
+                'patterns': [r'\b(GOCSPX-[A-Za-z0-9_-]{28})\b'],
+                'severity': 'HIGH', 'validate': None, 'case_sensitive': True,
+            },
+            'Azure AD Client Secret': {
+                'patterns': [
+                    r"""(?:^|[\\'"\x60\s>=:(,])"""
+                    r"""([a-zA-Z0-9_~.]{3}\dQ~[a-zA-Z0-9_~.-]{31,34})"""
+                    r"""(?:$|[\\'"\x60\s<),])""",
+                ],
+                'severity': 'CRITICAL', 'validate': None,
+            },
+            'Azure Storage Account Key': {
+                'patterns': [
+                    r'(?i)AccountKey=([A-Za-z0-9+/=]{60,})',
+                ],
+                'severity': 'CRITICAL', 'validate': None,
+            },
         }
 
     # ═════════════════════════════════════════════════════════════
@@ -8426,6 +8816,35 @@ class SecretScanner:
             'Database Connection String': ['database', 'db_', 'postgres', 'mysql', 'mongo', 'redis'],
             'Hardcoded Password': ['password', 'passwd', 'secret', 'auth'],
             'High-Entropy Secret': ['key', 'secret', 'token', 'auth'],
+            'OpenRouter API Key': ['openrouter'],
+            'Groq API Key': ['groq'],
+            'xAI API Key': ['xai', 'grok'],
+            'Perplexity API Key': ['perplexity', 'pplx'],
+            'Mistral API Key': ['mistral'],
+            'DeepSeek API Key': ['deepseek'],
+            'Together API Key': ['together'],
+            'Supabase Secret Key': ['supabase'],
+            'Resend API Key': ['resend'],
+            'Postman API Key': ['postman'],
+            'Pulumi Access Token': ['pulumi'],
+            'Sentry User Token': ['sentry'],
+            'Sentry Org Token': ['sentry'],
+            'Datadog API Key': ['datadog'],
+            'Databricks API Token': ['databricks'],
+            'Doppler API Token': ['doppler'],
+            'Fly.io Access Token': ['fly'],
+            'Slack App Token': ['slack', 'xapp'],
+            'Telegram Bot Token': ['telegram', 'bot_token'],
+            'Discord Webhook': ['discord', 'webhook'],
+            'Microsoft Teams Webhook': ['teams', 'webhook'],
+            'Atlassian API Token': ['atlassian', 'confluence', 'jira'],
+            'Mailchimp API Key': ['mailchimp'],
+            '1Password Service Account Token': ['1password', 'onepassword'],
+            'AWS Bedrock API Key': ['bedrock', 'aws'],
+            'AWS Secret Access Key': ['aws', 'secret_access_key'],
+            'Google OAuth Client Secret': ['oauth', 'client_secret', 'google'],
+            'Azure AD Client Secret': ['azure', 'client_secret'],
+            'Azure Storage Account Key': ['azure', 'accountkey', 'storage'],
         }
         keywords = type_keywords.get(secret_type, [])
         keyword_match = any(kw in ctx_lower for kw in keywords)
@@ -8437,6 +8856,13 @@ class SecretScanner:
             'AWS Access Key', 'GitHub Token', 'Stripe API Key',
             'SendGrid API Key', 'Notion API Key', 'Linear API Key',
             'Slack Webhook', 'Private Key', 'Database Connection String',
+            'OpenRouter API Key', 'Groq API Key', 'xAI API Key',
+            'Perplexity API Key', 'Postman API Key', 'Pulumi Access Token',
+            'Sentry User Token', 'Databricks API Token', 'Doppler API Token',
+            'Fly.io Access Token', '1Password Service Account Token',
+            'Age Secret Key', 'AWS Bedrock API Key', 'AWS Secret Access Key',
+            'Google OAuth Client Secret', 'Azure AD Client Secret',
+            'Azure Storage Account Key', 'Supabase Secret Key',
         }
         if secret_type in strong:
             return 'HIGH'
@@ -8980,7 +9406,7 @@ class SecretScanner:
                     if jwt_info:
                         finding['jwt_decoded'] = jwt_info
 
-                    # ── Active verification — v4.0 (50 verifiers) ──
+                    # ── Active verification — v5.4 (66 read-only routes) ──
                     if self.verifier:
                         vresult = self.verifier.verify(secret_type, val)
                         if vresult:
@@ -10513,7 +10939,7 @@ Examples:
                         default='none',
                         help='Exit 1 when confirmed/potential findings meet this severity (CI gate)')
     parser.add_argument('--scope', help='Scope file (one domain per line)')
-    parser.add_argument('--verify', action='store_true', help='Active API verification (50 verifiers)')
+    parser.add_argument('--verify', action='store_true', help='Active API verification (66 read-only routes)')
     parser.add_argument('--smart', action='store_true',
                         help='Intelligence-driven scanning: auto-selects modules per target')
     parser.add_argument('--path', help='Scan a local file or directory for secrets')
@@ -10676,7 +11102,7 @@ Examples:
     if args.ua_rotate:
         print(f"[*] UA rotation: ON")
     if args.verify:
-        print(f"[*] Active verification: ON (50 API verifiers)")
+        print(f"[*] Active verification: ON (66 read-only verifier routes)")
     if args.rate_limit:
         print(f"[*] Rate limit: {args.rate_limit} req/s")
     if args.probe_env:

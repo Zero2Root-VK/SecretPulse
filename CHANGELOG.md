@@ -1,5 +1,27 @@
 # Changelog
 
+## v5.4.0 (2026-11-14)
+### New Detection Coverage
+- Added 30 provider types and 36 patterns for 2026 infrastructure:
+  - AI/inference: OpenRouter, Groq, xAI, Perplexity, Mistral, DeepSeek, Together
+  - Developer/data: Supabase secret keys, Resend, Postman, Pulumi, Sentry user/org tokens, Datadog, Databricks, Doppler, Fly.io
+  - Collaboration: Slack app tokens, Telegram bot tokens, Discord and Microsoft Teams webhooks, Atlassian, Mailchimp
+  - Infrastructure: 1Password service accounts, Age secret keys, AWS Bedrock keys, AWS secret access keys, Google OAuth client secrets, Azure AD client secrets, Azure Storage account keys
+- Expanded OpenAI detection to `sk-proj-`, `sk-svcacct-`, and `sk-admin-` keys
+- Expanded GitLab detection to job, deploy, and runner authentication tokens
+- Fixed Mailgun rule matching inside Age secret keys
+
+### Verification
+- Added 14 read-only verifier routes: OpenRouter, Groq, xAI, Mistral, DeepSeek, Together, Resend, Postman, Pulumi, Sentry user, Datadog, Telegram, Discord webhooks, and Mailchimp
+- Verification uses GET requests only; no provider resources are created, modified, or deleted
+- Verifier routes now total 66, with provider details included in `verification_detail`
+
+### Accuracy
+- Added exact format and length checks for all new prefixed token families
+- Added provider-aware confidence keywords and high-confidence classifications
+- Regression suite in `tests/test_capability_pack.py` confirms all 30 new types detect without cross-provider false positives
+- Verifier tests confirm all 14 new routes use GET-only requests and provider-specific auth headers
+
 ## v5.3.0 (2026-11-14)
 ### Breaking Changes
 - CLI reduced to 16 flags: URLs, `-v`, `-o`, `--html`, `--sarif`, `--fail-on`, `--scope`, `--verify`, `--smart`, `--path`, `--git`, `--git-max-commits`, `--gitleaks-config`, `--db`, `--diff`, `--baseline`

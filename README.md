@@ -1,6 +1,6 @@
 # <img src="secretpulse-icon.svg" width="32" height="32" alt=""> SecretPulse — The Scanner That Proves It
 
-![Version](https://img.shields.io/badge/version-5.3.0-blue)
+![Version](https://img.shields.io/badge/version-5.4.0-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-Standard-cyan)
 ![Modules](https://img.shields.io/badge/modules-13-purple)
@@ -30,8 +30,8 @@ SecretPulse combines secret scanning with per-target web exposure checks. It is 
 
 | Capability | SecretPulse | TruffleHog | Gitleaks | GitGuardian |
 |------------|-------------|------------|----------|-------------|
-| Detection breadth | 124 patterns / 78 types | 800+ detectors | Large built-in ruleset | Large detector set |
-| Live credential verification | 50 verifiers | ✓ Verified-only mode | ✗ | ✓ 5-state validity |
+| Detection breadth | 160 patterns / 108 types | 800+ detectors | Large built-in ruleset | Large detector set |
+| Live credential verification | 66 routes | ✓ Verified-only mode | ✗ | ✓ 5-state validity |
 | Finding prioritization | 6-factor confidence heuristic (0-100) | Verification + detector metadata | Entropy + allowlists | Validity + severity/risk |
 | Local files + git history | ✓ Native | ✓ | ✓ | ✓ Via integrations/`ggshield` |
 | Baseline / history comparison | ✓ `--diff`, `--baseline` | ✓ Git ranges | ✓ `--baseline-path` | ✓ Incident lifecycle |
@@ -80,7 +80,8 @@ python3 SecretPulse.py https://target.com \
 
 ## Features
 
-- **124 built-in secret-pattern regexes across 78 types** — API keys, tokens, credentials, cloud secrets
+- **160 built-in secret-pattern regexes across 108 types** — API keys, tokens, credentials, cloud secrets
+- **2026 provider coverage** — OpenRouter, Groq, xAI, Perplexity, Mistral, DeepSeek, Together, Supabase secret keys, Postman, Pulumi, Sentry, Datadog, Telegram, AWS secret keys, and more
 - **Modular scanning** — secrets, CORS, JWT, open redirect, read-only cloud permissions, dependency confusion, SSRF indicators, IDOR candidates, subdomain takeover
 - **Unified findings** — every result carries `confirmed`, `potential`, or `lead`; only confirmed/potential findings can fail a CI build
 - **6-factor confidence scoring** — format, context, ownership, file path, entropy, live validation → single 0-100 score
@@ -151,7 +152,7 @@ Advanced modules — CORS, JWT, open redirect, cloud permissions, dependency con
 | `--sarif FILE` | SARIF 2.1.0 output for code scanning |
 | `--fail-on LEVEL` | Exit 1 on confirmed/potential findings at or above LEVEL |
 | `--scope FILE` | Scope file (one domain per line) |
-| `--verify` | Active API verification (50 verifiers) |
+| `--verify` | Active API verification (66 read-only routes) |
 | `--smart` | Adaptive module selection per target (recommended) |
 | `--path PATH` | Scan a local file or directory |
 | `--git REPO` | Scan a local git repository's history |
@@ -167,7 +168,7 @@ Advanced modules — CORS, JWT, open redirect, cloud permissions, dependency con
 
 **Vinod Kumar Bontha**
 
-Built as a single Python file. 11,300+ lines. No frameworks. No backend service. No telemetry.
+Built as a single Python file. 11,600+ lines. No frameworks. No backend service. No telemetry.
 
 For authorized security testing only.
 
