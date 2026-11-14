@@ -1,5 +1,29 @@
 # Changelog
 
+## v5.5.0 (2026-11-14)
+### New Exposure Coverage
+- Added validated sensitive-file discovery for Git, Mercurial, and SVN metadata; `.DS_Store`; SSH private keys; SQL and ZIP backups; PHP config backups; IIS/app settings; Spring Actuator; Apache server-status; phpinfo; Terraform state; and Docker Compose
+- Sensitive-path probing reads only a 16 KB prefix and validates content signatures, so SPA soft-404 pages returning 200 HTML are not reported
+- Added `.env`, GraphQL introspection, OpenAPI, gRPC indicators, and sensitive-file findings to the unified finding model, JSON, HTML, and SARIF
+- GraphQL findings merge the lightweight and full-schema probes into one result per endpoint and raise severity when mutations are exposed
+
+### Takeover Analysis
+- Replaced the previous heuristic with DNS-over-HTTPS CNAME resolution and claimable-service matching
+- Takeover findings now require a CNAME to a known service plus a matching fingerprint or an unreachable destination
+- Removed NXDOMAIN and TLS-error false positives
+- `--smart` now runs takeover analysis on scanned subdomains automatically
+
+### Reporting
+- Unified findings now include CWE, OWASP category, remediation, and a copy-ready reproduction command
+- HTML exposure table renders evidence, CWE/OWASP, remediation, and repro commands
+- SARIF rules include CWE `helpUri`, remediation, repro, and per-finding partial fingerprints
+
+### Bug Fixes
+- Unclassified web apps now run GraphQL, OpenAPI, and open-redirect discovery by default instead of only `.env` and CORS
+- Fixed WAF stealth mode permanently disabling `.env`, GraphQL, Swagger, sensitive-file, and takeover probes; probes are restored after the cooldown
+- Removed the inert `verify` module from smart always-on routing and replaced it with real sensitive-file and takeover modules
+- Added exposure validation coverage in `tests/test_v55_exposure.py`; full suite now covers 14 detection, verifier, exposure, takeover, WAF, and SARIF tests
+
 ## v5.4.0 (2026-11-14)
 ### New Detection Coverage
 - Added 30 provider types and 36 patterns for 2026 infrastructure:

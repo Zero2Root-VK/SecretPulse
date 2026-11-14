@@ -1,9 +1,9 @@
 # <img src="secretpulse-icon.svg" width="32" height="32" alt=""> SecretPulse — The Scanner That Proves It
 
-![Version](https://img.shields.io/badge/version-5.4.0-blue)
+![Version](https://img.shields.io/badge/version-5.5.0-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-Standard-cyan)
-![Modules](https://img.shields.io/badge/modules-13-purple)
+![Findings](https://img.shields.io/badge/findings-unified-purple)
 
 **Find secrets. Score them 0-100. Free forever.**
 
@@ -83,14 +83,17 @@ python3 SecretPulse.py https://target.com \
 - **160 built-in secret-pattern regexes across 108 types** — API keys, tokens, credentials, cloud secrets
 - **2026 provider coverage** — OpenRouter, Groq, xAI, Perplexity, Mistral, DeepSeek, Together, Supabase secret keys, Postman, Pulumi, Sentry, Datadog, Telegram, AWS secret keys, and more
 - **Modular scanning** — secrets, CORS, JWT, open redirect, read-only cloud permissions, dependency confusion, SSRF indicators, IDOR candidates, subdomain takeover
+- **Sensitive-file discovery** — validated probes for Git/Mercurial/SVN metadata, backups, private keys, Actuator, Terraform state, and Docker Compose
+- **CNAME takeover analysis** — DNS-over-HTTPS CNAME resolution plus service fingerprinting, without NXDOMAIN false positives
 - **Unified findings** — every result carries `confirmed`, `potential`, or `lead`; only confirmed/potential findings can fail a CI build
+- **Evidence-grade output** — CWE, OWASP mapping, remediation, and copy-ready repro commands in JSON, HTML, and SARIF
 - **6-factor confidence scoring** — format, context, ownership, file path, entropy, live validation → single 0-100 score
 - **Smart mode** — classifies each subdomain (API, admin, auth, staging) and runs only relevant modules
 - **Subdomain recon** — CT logs + DNS resolution + HTTP probe + risk scoring
-- **WAF adaptive intelligence** — auto-detects Cloudflare/Akamai pressure, enters stealth mode, escalates to deep stealth
+- **WAF adaptive intelligence** — auto-detects Cloudflare/Akamai pressure, enters stealth mode, escalates to deep stealth, then restores paused probes after recovery
 - **Differential scanning** — `--diff` shows new findings, resolved issues, new endpoints vs previous scan
 - **SQLite persistence** — track findings across scans with `--db`
-- **JSON + HTML + SARIF output** — dark-themed HTML reports with finding deduplication
+- **JSON + HTML + SARIF output** — dark-themed HTML reports with finding deduplication and exposure evidence
 
 ---
 
@@ -111,7 +114,7 @@ python3 SecretPulse.py --git . --git-max-commits 200
 python3 SecretPulse.py --path ./src --gitleaks-config .gitleaks.toml
 ```
 
-Advanced modules — CORS, JWT, open redirect, cloud permissions, dependency confusion, SSRF/IDOR indicators, and subdomain takeover — are selected automatically by `--smart`. They are not exposed as separate flags.
+Advanced modules — CORS, JWT, open redirect, cloud permissions, dependency confusion, SSRF/IDOR indicators, sensitive-file discovery, and subdomain takeover — are selected automatically by `--smart`. They are not exposed as separate flags.
 
 ---
 
@@ -168,7 +171,7 @@ Advanced modules — CORS, JWT, open redirect, cloud permissions, dependency con
 
 **Vinod Kumar Bontha**
 
-Built as a single Python file. 11,600+ lines. No frameworks. No backend service. No telemetry.
+Built as a single Python file. 12,000+ lines. No frameworks. No backend service. No telemetry.
 
 For authorized security testing only.
 

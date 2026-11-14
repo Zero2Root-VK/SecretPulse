@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SecretPulse v5.3.0
+SecretPulse v5.5.0
 ════════════════════════════════════════════
 High-Signal Secret & API Exposure Scanner
 Designed to maximize bounty impact and minimize noise.
@@ -85,9 +85,9 @@ try:
 except ImportError:
     HAS_ASYNC = False
 
-__version__ = '5.4.0'
+__version__ = '5.5.0'
 __author__  = 'Vinod Kumar Bontha'
-__lines__   = '11,600+'
+__lines__   = '12,000+'
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -854,6 +854,84 @@ GRAPHQL_PATHS = [
     '/graphql', '/api/graphql', '/graphql/console', '/gql',
     '/query', '/api/query', '/graphiql', '/playground',
     '/v1/graphql', '/api/v1/graphql',
+]
+
+# v5.5: high-signal sensitive paths. Every probe is validated against
+# content, so SPA soft-404s returning 200 HTML do not become findings.
+SENSITIVE_FILE_PROBES = [
+    {
+        'path': '/.git/config', 'type': 'Exposed Git Config', 'severity': 'HIGH',
+        'markers': ('[core]', 'repositoryformatversion'), 'scan': True,
+    },
+    {
+        'path': '/.git/HEAD', 'type': 'Exposed Git HEAD', 'severity': 'MEDIUM',
+        'regex': r'(?m)^(ref:\s+refs/|[0-9a-f]{40}\s*$)',
+    },
+    {
+        'path': '/.svn/entries', 'type': 'Exposed SVN Metadata', 'severity': 'MEDIUM',
+        'markers': ('svn', 'dir'),
+    },
+    {
+        'path': '/.hg/requires', 'type': 'Exposed Mercurial Metadata', 'severity': 'MEDIUM',
+        'markers': ('revlogv1',),
+    },
+    {
+        'path': '/.DS_Store', 'type': 'Exposed .DS_Store', 'severity': 'LOW',
+        'binary_marker': b'Bud1',
+    },
+    {
+        'path': '/.ssh/id_rsa', 'type': 'Exposed SSH Private Key', 'severity': 'CRITICAL',
+        'markers': ('PRIVATE KEY',), 'scan': True,
+    },
+    {
+        'path': '/id_rsa', 'type': 'Exposed SSH Private Key', 'severity': 'CRITICAL',
+        'markers': ('PRIVATE KEY',), 'scan': True,
+    },
+    {
+        'path': '/backup.zip', 'type': 'Exposed Backup Archive', 'severity': 'HIGH',
+        'magic': b'PK', 'content_types': ('application/zip', 'application/x-zip-compressed',
+                                         'application/octet-stream'),
+    },
+    {
+        'path': '/backup.sql', 'type': 'Exposed SQL Backup', 'severity': 'HIGH',
+        'markers': ('CREATE TABLE', 'INSERT INTO'), 'scan': True,
+    },
+    {
+        'path': '/dump.sql', 'type': 'Exposed SQL Dump', 'severity': 'HIGH',
+        'markers': ('CREATE TABLE', 'INSERT INTO'), 'scan': True,
+    },
+    {
+        'path': '/config.php.bak', 'type': 'Exposed PHP Config Backup', 'severity': 'HIGH',
+        'markers': ('<?php', 'password', 'DB_'), 'scan': True,
+    },
+    {
+        'path': '/web.config', 'type': 'Exposed IIS Config', 'severity': 'MEDIUM',
+        'markers': ('<configuration', 'connectionString'), 'scan': True,
+    },
+    {
+        'path': '/appsettings.json', 'type': 'Exposed App Settings', 'severity': 'MEDIUM',
+        'markers': ('ConnectionStrings', 'Logging'), 'scan': True,
+    },
+    {
+        'path': '/actuator/env', 'type': 'Exposed Spring Actuator Env', 'severity': 'HIGH',
+        'markers': ('propertySources', 'activeProfiles'), 'scan': True,
+    },
+    {
+        'path': '/server-status', 'type': 'Exposed Apache Server Status', 'severity': 'MEDIUM',
+        'markers': ('Apache Server Status',), 'allow_html': True,
+    },
+    {
+        'path': '/phpinfo.php', 'type': 'Exposed PHP Info', 'severity': 'MEDIUM',
+        'markers': ('PHP Version', 'phpinfo()'), 'allow_html': True,
+    },
+    {
+        'path': '/terraform.tfstate', 'type': 'Exposed Terraform State', 'severity': 'CRITICAL',
+        'markers': ('terraform_version', 'resources'), 'scan': True,
+    },
+    {
+        'path': '/docker-compose.yml', 'type': 'Exposed Docker Compose', 'severity': 'MEDIUM',
+        'markers': ('services:', 'version:'), 'scan': True,
+    },
 ]
 
 
@@ -3804,60 +3882,122 @@ class SubdomainTakeoverChecker:
     VULNERABLE_CNAMES = {
         'herokuapp.com': 'Heroku', 'herokudns.com': 'Heroku',
         'github.io': 'GitHub Pages', 'azurewebsites.net': 'Azure',
-        'cloudapp.net': 'Azure', 'trafficmanager.net': 'Azure Traffic Manager',
+        'cloudapp.net': 'Azure', 'cloudapp.azure.com': 'Azure',
+        'trafficmanager.net': 'Azure Traffic Manager',
         's3.amazonaws.com': 'AWS S3', 's3-website': 'AWS S3 Website',
-        'elasticbeanstalk.com': 'AWS EB', 'shopify.com': 'Shopify',
-        'myshopify.com': 'Shopify', 'zendesk.com': 'Zendesk',
-        'readme.io': 'ReadMe', 'ghost.io': 'Ghost',
+        'elasticbeanstalk.com': 'AWS EB', 'cloudfront.net': 'AWS CloudFront',
+        'shopify.com': 'Shopify', 'myshopify.com': 'Shopify',
+        'zendesk.com': 'Zendesk', 'readme.io': 'ReadMe', 'ghost.io': 'Ghost',
         'netlify.app': 'Netlify', 'pantheon.io': 'Pantheon',
         'surge.sh': 'Surge', 'bitbucket.io': 'Bitbucket',
         'wordpress.com': 'WordPress', 'tumblr.com': 'Tumblr',
         'statuspage.io': 'Statuspage', 'fastly.net': 'Fastly',
         'unbounce.com': 'Unbounce', 'uservoice.com': 'UserVoice',
+        'webflow.io': 'Webflow', 'cargo.site': 'Cargo', 'tilda.ws': 'Tilda',
     }
 
     TAKEOVER_SIGNATURES = [
         "There isn't a GitHub Pages site here",
-        "NoSuchBucket", "No such app", "Heroku | No such app",
+        "NoSuchBucket", "The specified bucket does not exist",
+        "No such app", "Heroku | No such app",
         "404 Blog is not found", "is not a registered InCloud",
         "Domain is not configured", "project not found",
         "Sorry, this shop is currently unavailable",
-        "Do you want to register",
+        "Do you want to register", "Fastly error: unknown domain",
+        "404 Web Site not found", "This site is not configured",
+        "Repository not found", "no such app",
     ]
 
     def __init__(self, session, verbose=False):
         self.session = session
         self.verbose = verbose
         self.findings: List[Dict] = []
+        self._checked: Set[str] = set()
+
+    def _doh_cname(self, domain):
+        """Resolve a CNAME through DNS-over-HTTPS without extra dependencies."""
+        try:
+            resp = self.session.get(
+                'https://dns.google/resolve',
+                params={'name': domain, 'type': 'CNAME'},
+                headers={'Accept': 'application/dns-json'},
+                timeout=8,
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            for answer in data.get('Answer', []):
+                if answer.get('type') == 5 and answer.get('data'):
+                    return str(answer['data']).rstrip('.').lower()
+        except Exception:
+            return None
+        return None
+
+    def _service_for_target(self, target):
+        for suffix, service in self.VULNERABLE_CNAMES.items():
+            if target == suffix or target.endswith('.' + suffix):
+                return service
+            if suffix == 's3-website' and suffix in target:
+                return service
+        return None
 
     def check_cname(self, domain: str):
-        """Check if domain has dangling CNAME pointing to vulnerable service."""
+        """Check a real CNAME chain and fingerprint the destination page.
+
+        NXDOMAIN and TLS failures are not takeover evidence by themselves, so
+        they are intentionally not reported. A finding requires a CNAME to a
+        known claimable service plus a matching takeover page or a failed
+        destination fetch.
+        """
+        domain = (domain or '').strip().lower().rstrip('.')
+        if not domain or domain in self._checked:
+            return False
+        self._checked.add(domain)
+
         try:
-            socket.getaddrinfo(domain, None)
-            try:
-                resp = self.session.get(f'https://{domain}', timeout=10, allow_redirects=True)
-                for sig in self.TAKEOVER_SIGNATURES:
-                    if sig.lower() in resp.text.lower():
-                        self.findings.append({
-                            'domain': domain, 'signature': sig,
-                            'severity': 'CRITICAL', 'status_code': resp.status_code,
-                        })
-                        return True
-            except requests.exceptions.SSLError:
-                self.findings.append({
-                    'domain': domain, 'signature': 'SSL error (possible dangling CNAME)',
-                    'severity': 'HIGH', 'status_code': 0,
-                })
-                return True
-            except Exception:
-                pass
-        except socket.gaierror:
+            ipaddress.ip_address(domain)
+            return False
+        except ValueError:
+            pass
+        if '.' not in domain or not re.fullmatch(r'[a-z0-9.-]+', domain):
+            return False
+
+        cname = self._doh_cname(domain)
+        if not cname:
+            return False
+        service = self._service_for_target(cname)
+        if not service:
+            return False
+
+        status_code = 0
+        try:
+            resp = self.session.get(f'https://{domain}', timeout=10, allow_redirects=True)
+            status_code = resp.status_code
+            body = resp.text[:200000].lower()
+            for sig in self.TAKEOVER_SIGNATURES:
+                if sig.lower() in body:
+                    self.findings.append({
+                        'domain': domain, 'cname': cname, 'service': service,
+                        'signature': sig, 'severity': 'CRITICAL',
+                        'status': 'potential', 'confidence': 'HIGH',
+                        'status_code': status_code,
+                    })
+                    return True
             self.findings.append({
-                'domain': domain, 'signature': 'NXDOMAIN (dangling DNS)',
-                'severity': 'HIGH', 'status_code': 0,
+                'domain': domain, 'cname': cname, 'service': service,
+                'signature': f'CNAME points to {service}; verify claimability',
+                'severity': 'LOW', 'status': 'lead', 'confidence': 'MEDIUM',
+                'status_code': status_code,
             })
             return True
-        return False
+        except Exception:
+            self.findings.append({
+                'domain': domain, 'cname': cname, 'service': service,
+                'signature': f'{service} destination is unreachable; verify claimability',
+                'severity': 'MEDIUM', 'status': 'lead', 'confidence': 'MEDIUM',
+                'status_code': status_code,
+            })
+            return True
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -6295,10 +6435,13 @@ class SmartRouter:
     }
 
     # Default modules for unknown asset types
-    DEFAULT_MODULES = ['probe_env', 'cors_check']
+    DEFAULT_MODULES = [
+        'probe_env', 'cors_check', 'open_redirect',
+        'probe_graphql', 'probe_swagger',
+    ]
 
     # Always-on modules (run on every target regardless)
-    ALWAYS_ON = ['verify', 'scan_cloud']
+    ALWAYS_ON = ['scan_cloud', 'sensitive_files', 'takeover']
 
     @staticmethod
     def classify(subdomain: str, domain: str, http_data: dict = None) -> dict:
@@ -6380,6 +6523,9 @@ class SmartRouter:
             if t in matched_types:
                 primary_type = t
                 break
+
+        if primary_type == 'static_asset':
+            matched_modules.discard('sensitive_files')
 
         return {
             'type': primary_type,
@@ -7697,7 +7843,25 @@ def export_sarif(findings: List[Dict], stats: Dict, filename: str):
         ev = f.get('evidence') or {}
 
         if rule_id not in rules:
-            rules[rule_id] = {
+            cwe = f.get('cwe', '')
+            rule_props = {
+                'security-severity': {
+                    'CRITICAL': '9.5', 'HIGH': '7.5',
+                    'MEDIUM': '5.0', 'LOW': '2.5', 'INFO': '0.0',
+                }.get(severity, '5.0')
+            }
+            if cwe:
+                rule_props['cwe'] = cwe
+                cwe_num = re.search(r'(\d+)', cwe)
+                if cwe_num:
+                    rule_props['helpUri'] = (
+                        f'https://cwe.mitre.org/data/definitions/{cwe_num.group(1)}.html'
+                    )
+            if f.get('owasp'):
+                rule_props['owasp'] = f['owasp']
+            if f.get('remediation'):
+                rule_props['remediation'] = f['remediation']
+            rule = {
                 'id': rule_id,
                 'name': ftype,
                 'shortDescription': {'text': f"Detected {ftype}"},
@@ -7707,13 +7871,11 @@ def export_sarif(findings: List[Dict], stats: Dict, filename: str):
                         'MEDIUM': 'warning', 'LOW': 'note', 'INFO': 'note',
                     }.get(severity, 'warning')
                 },
-                'properties': {
-                    'security-severity': {
-                        'CRITICAL': '9.5', 'HIGH': '7.5',
-                        'MEDIUM': '5.0', 'LOW': '2.5', 'INFO': '0.0',
-                    }.get(severity, '5.0')
-                },
+                'properties': rule_props,
             }
+            if rule_props.get('helpUri'):
+                rule['helpUri'] = rule_props['helpUri']
+            rules[rule_id] = rule
 
         val_masked = str(f.get('value', '') or '')
         if len(val_masked) > 12:
@@ -7745,7 +7907,12 @@ def export_sarif(findings: List[Dict], stats: Dict, filename: str):
                 'validated': ev.get('validated', f.get('validated', False)),
                 'entropy': ev.get('entropy', f.get('entropy', 0)),
                 'fingerprint': f.get('id', ''),
+                'cwe': f.get('cwe', ''),
+                'owasp': f.get('owasp', ''),
+                'remediation': f.get('remediation', ''),
+                'repro': f.get('repro', ''),
             },
+            'partialFingerprints': {'secretPulse/v1': f.get('id', '')},
         }
         verified = f.get('verified_live', ev.get('verified_live'))
         if verified is not None:
@@ -7806,6 +7973,7 @@ class SecretScanner:
         self.probe_env = probe_env
         self.probe_graphql = probe_graphql
         self.probe_swagger = probe_swagger
+        self.probe_sensitive = False
         self.scan_cloud = scan_cloud
         self.enable_wayback = wayback
         self.enable_subtko = subtko
@@ -7835,6 +8003,8 @@ class SecretScanner:
         self.discovered_internal_urls: List[Dict] = []
         self.graphql_endpoints: List[Dict] = []
         self.env_files_found: List[Dict] = []
+        self.sensitive_files_found: List[Dict] = []
+        self._sensitive_probed_origins: Set[str] = set()
         self.google_scope_results: List[Dict] = []
         self.source_map_intel: List[Dict] = []
         self.supply_chain = SupplyChainMapper()
@@ -7851,6 +8021,7 @@ class SecretScanner:
             'retries_used': 0, 'waf_blocked': 0,
             'source_maps_found': 0, 'chunks_discovered': 0,
             'env_files_found': 0, 'graphql_found': 0,
+            'sensitive_files_found': 0,
             'endpoints_discovered': 0, 'internal_ips_found': 0,
             'private_keys_found': 0, 'buckets_found': 0,
             'secrets_verified_live': 0, 'db_strings_found': 0,
@@ -7931,6 +8102,7 @@ class SecretScanner:
         self._waf_cooldown_secs = 90        # Minimum seconds before recovery attempt
         self._waf_escalation = 0            # 0=normal, 1=stealth, 2=deep stealth
         self._waf_total_blocks = 0          # Lifetime WAF blocks for this scan
+        self._waf_paused_probes = None      # Probe flags paused by stealth mode
 
         # Merge custom rules
         if custom_rules:
@@ -7964,9 +8136,16 @@ class SecretScanner:
                 self.rate_limiter.rps = max(1.0, self.rate_limiter.rps / 3)
             else:
                 self.rate_limiter.rps = 2.0
+            self._waf_paused_probes = {
+                name: getattr(self, name, False) for name in
+                ('probe_env', 'probe_graphql', 'probe_swagger',
+                 'probe_sensitive', 'enable_subtko')
+            }
             self.probe_env = False
             self.probe_graphql = False
             self.probe_swagger = False
+            self.probe_sensitive = False
+            self.enable_subtko = False
             print(f"\n{Colors.WARNING}  [SMART] WAF pressure detected ({waf_rate} blocks/30s) "
                   f"→ Stealth mode: {self.max_workers} workers, "
                   f"{self.rate_limiter.rps:.1f} req/s, noisy probes disabled{Colors.ENDC}")
@@ -7985,6 +8164,12 @@ class SecretScanner:
             elapsed_stealth = now - self._waf_stealth_activated_at
             if elapsed_stealth < self._waf_cooldown_secs:
                 return  # Too soon — stay in stealth
+
+            # Restore probes paused on entry; WAF pressure has eased.
+            if self._waf_paused_probes:
+                for name, value in self._waf_paused_probes.items():
+                    setattr(self, name, value)
+                self._waf_paused_probes = None
 
             # Gradual recovery based on total WAF pressure seen
             self._waf_stealth_mode = False
@@ -9174,6 +9359,94 @@ class SecretScanner:
                 pass
 
     # ═════════════════════════════════════════════════════════════
+    #  Sensitive file discovery
+    # ═════════════════════════════════════════════════════════════
+
+    def _sensitive_probe_get(self, url, limit=16384):
+        """Fetch only a prefix of a sensitive path; avoids downloading dumps."""
+        self.rate_limiter.wait()
+        self.stats['requests_made'] += 1
+        try:
+            headers = self._get_headers()
+            headers['Accept'] = '*/*'
+            resp = self.session.get(
+                url, timeout=8, allow_redirects=True, stream=True, headers=headers
+            )
+            if resp.status_code == 403:
+                self.stats['waf_blocked'] += 1
+                self.progress.increment('waf_blocked')
+                self._waf_hits_window.append(time.time())
+                self._adapt_to_waf()
+                resp.close()
+                return resp, b''
+            chunks, total = [], 0
+            for chunk in resp.iter_content(chunk_size=2048):
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                total += len(chunk)
+                if total >= limit:
+                    break
+            prefix = b''.join(chunks)
+            resp.close()
+            return resp, prefix
+        except Exception:
+            self.stats['requests_failed'] += 1
+            return None, b''
+
+    @staticmethod
+    def _sensitive_matches(probe, prefix, content_type):
+        ct = (content_type or '').lower()
+        if probe.get('content_types') and not any(t in ct for t in probe['content_types']):
+            return False
+        if not probe.get('allow_html') and 'html' in ct:
+            return False
+        if probe.get('magic') and not prefix.startswith(probe['magic']):
+            return False
+        if probe.get('binary_marker') and probe['binary_marker'] not in prefix:
+            return False
+        text = prefix.decode('utf-8', 'ignore')
+        markers = probe.get('markers') or ()
+        if markers and not any(m.lower() in text.lower() for m in markers):
+            return False
+        regex = probe.get('regex')
+        if regex and not re.search(regex, text, re.I):
+            return False
+        return True
+
+    def probe_sensitive_files(self, base_url):
+        parsed = urlparse(base_url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        if origin in self._sensitive_probed_origins:
+            return
+        self._sensitive_probed_origins.add(origin)
+        if self.verbose:
+            print(f"{Colors.OKCYAN}  [*] Probing {len(SENSITIVE_FILE_PROBES)} "
+                  f"sensitive paths...{Colors.ENDC}")
+        for probe in SENSITIVE_FILE_PROBES:
+            url = origin + probe['path']
+            resp, prefix = self._sensitive_probe_get(url)
+            if resp is None or resp.status_code != 200 or not prefix:
+                continue
+            content_type = resp.headers.get('Content-Type', '')
+            if not self._sensitive_matches(probe, prefix, content_type):
+                continue
+            text = prefix.decode('utf-8', 'ignore')
+            record = {
+                'url': url, 'path': probe['path'], 'type': probe['type'],
+                'severity': probe['severity'], 'status_code': resp.status_code,
+                'content_type': content_type.split(';')[0].strip(),
+                'bytes_inspected': len(prefix),
+            }
+            self.stats['sensitive_files_found'] += 1
+            self.sensitive_files_found.append(record)
+            color = Colors.FAIL if probe['severity'] in ('CRITICAL', 'HIGH') else Colors.WARNING
+            print(f"{color}[{probe['severity']}]{Colors.ENDC} [conf:HIGH] "
+                  f"{probe['type']}: {url}")
+            if probe.get('scan') and text:
+                self.scan_content(text, f"{url} (sensitive file)")
+
+    # ═════════════════════════════════════════════════════════════
     #  robots.txt / sitemap
     # ═════════════════════════════════════════════════════════════
 
@@ -9653,6 +9926,13 @@ class SecretScanner:
                 print(f"{Colors.DIM}  [~] Out of scope: {url}{Colors.ENDC}")
             return
         self.scanned_urls.add(url)
+        is_archive_url = 'web.archive.org' in url or 'archive.org' in url
+
+        # v5.5: check CNAME takeover before fetching, so dead hosts still count
+        if depth == 0 and self.enable_subtko and not is_archive_url:
+            hostname = urlparse(url).hostname
+            if hostname:
+                self.subtko.check_cname(hostname)
 
         try:
             if self.verbose:
@@ -9685,9 +9965,6 @@ class SecretScanner:
             if self.cloud_scanner:
                 self.cloud_scanner.scan(html_content, url)
 
-            # Skip probes on archive.org URLs (pointless + wastes time)
-            is_archive_url = 'web.archive.org' in url or 'archive.org' in url
-
             # v5.2: Exposure modules were previously constructed but never run.
             if depth == 0 and not is_archive_url:
                 if self.enable_cors and getattr(self, 'cors_detector', None):
@@ -9699,6 +9976,8 @@ class SecretScanner:
                 self.parse_robots_sitemap(url)
             if depth == 0 and self.probe_env and not is_archive_url:
                 self.probe_env_files(url)
+            if depth == 0 and self.probe_sensitive and not is_archive_url:
+                self.probe_sensitive_files(url)
             if depth == 0 and self.probe_graphql and not is_archive_url:
                 self.probe_graphql_endpoints(url)
             # v3.0: Swagger/OpenAPI probing
@@ -10124,10 +10403,22 @@ class SecretScanner:
             print(f"\n{Colors.FAIL}⚠ .env Files: {len(self.env_files_found)}{Colors.ENDC}")
             for ef in self.env_files_found:
                 print(f"  {ef['url']} ({ef['lines']} vars)")
+        if self.sensitive_files_found:
+            print(f"\n{Colors.FAIL}⚠ Sensitive Files: {len(self.sensitive_files_found)}{Colors.ENDC}")
+            for sf in self.sensitive_files_found:
+                print(f"  [{sf['severity']}] {sf['type']}: {sf['url']}")
         if self.graphql_endpoints:
             print(f"\n{Colors.FAIL}⚠ GraphQL: {len(self.graphql_endpoints)}{Colors.ENDC}")
             for gql in self.graphql_endpoints:
                 print(f"  {gql['url']}")
+        if self.api_discovery.swagger_specs:
+            print(f"\n{Colors.FAIL}⚠ OpenAPI Schemas: {len(self.api_discovery.swagger_specs)}{Colors.ENDC}")
+            for spec in self.api_discovery.swagger_specs:
+                print(f"  {spec['url']} ({spec['endpoints']} endpoints)")
+        if self.subtko.findings:
+            print(f"\n{Colors.FAIL}⚠ Takeover Leads: {len(self.subtko.findings)}{Colors.ENDC}")
+            for tf in self.subtko.findings:
+                print(f"  [{tf.get('severity')}] {tf.get('domain')} -> {tf.get('cname')}")
         if self.google_scope_results:
             print(f"\n{Colors.FAIL}⚠ Google API Scopes:{Colors.ENDC}")
             for gs in self.google_scope_results:
@@ -10294,8 +10585,78 @@ class SecretScanner:
     SEVERITY_RANK = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3, 'INFO': 4}
     BLOCKING_STATUSES = {'confirmed', 'potential'}
 
+    FINDING_META = {
+        'secret': {
+            'cwe': 'CWE-798', 'owasp': 'A07:2021 Identification and Authentication Failures',
+            'remediation': 'Revoke and rotate the credential, remove it from source, and load it from a managed secret store.',
+        },
+        'cors': {
+            'cwe': 'CWE-942', 'owasp': 'A05:2021 Security Misconfiguration',
+            'remediation': 'Allowlist exact trusted origins and never combine credentialed requests with reflected or wildcard origins.',
+        },
+        'redirect': {
+            'cwe': 'CWE-601', 'owasp': 'A01:2021 Broken Access Control',
+            'remediation': 'Allowlist redirect destinations and reject absolute or protocol-relative URLs outside that list.',
+        },
+        'env': {
+            'cwe': 'CWE-538', 'owasp': 'A05:2021 Security Misconfiguration',
+            'remediation': 'Remove environment files from the web root, block dotfiles at the edge, and rotate every exposed value.',
+        },
+        'sensitive_file': {
+            'cwe': 'CWE-538', 'owasp': 'A05:2021 Security Misconfiguration',
+            'remediation': 'Remove the file from the public root or deny access at the edge, then rotate any exposed credentials.',
+        },
+        'graphql': {
+            'cwe': 'CWE-200', 'owasp': 'A05:2021 Security Misconfiguration',
+            'remediation': 'Disable introspection in production and require authorization on the GraphQL endpoint.',
+        },
+        'swagger': {
+            'cwe': 'CWE-200', 'owasp': 'A05:2021 Security Misconfiguration',
+            'remediation': 'Restrict API documentation to authenticated or internal users.',
+        },
+        'cloud': {
+            'cwe': 'CWE-200', 'owasp': 'A05:2021 Security Misconfiguration',
+            'remediation': 'Remove embedded cloud configuration from client content and apply least privilege.',
+        },
+        'cloud_permissions': {
+            'cwe': 'CWE-284', 'owasp': 'A01:2021 Broken Access Control',
+            'remediation': 'Enable public access blocking and scope bucket or storage permissions to intended principals.',
+        },
+        'jwt': {
+            'cwe': 'CWE-347', 'owasp': 'A07:2021 Identification and Authentication Failures',
+            'remediation': 'Verify signatures with pinned algorithms, reject alg=none, and replace weak signing secrets.',
+        },
+        'dependency': {
+            'cwe': 'CWE-427', 'owasp': 'A08:2021 Software and Data Integrity Failures',
+            'remediation': 'Use a scoped private registry, reserve internal package names, and pin verified dependency sources.',
+        },
+        'takeover': {
+            'cwe': 'CWE-284', 'owasp': 'A05:2021 Security Misconfiguration',
+            'remediation': 'Remove the dangling DNS record or reclaim the third-party resource before attackers do.',
+        },
+        'header': {
+            'cwe': 'CWE-693', 'owasp': 'A05:2021 Security Misconfiguration',
+            'remediation': 'Set the missing security header at the application or reverse proxy.',
+        },
+        'ssrf': {
+            'cwe': 'CWE-918', 'owasp': 'A10:2021 Server-Side Request Forgery',
+            'remediation': 'Validate outbound destinations against an allowlist and block metadata and internal address ranges.',
+        },
+        'idor': {
+            'cwe': 'CWE-639', 'owasp': 'A01:2021 Broken Access Control',
+            'remediation': 'Enforce object-level authorization on every request and use unguessable identifiers.',
+        },
+        'grpc': {
+            'cwe': 'CWE-200', 'owasp': 'A05:2021 Security Misconfiguration',
+            'remediation': 'Require authentication and transport security for exposed gRPC services.',
+        },
+    }
+
     def _mk_finding(self, category, ftype, severity, confidence, status,
-                    source, value='', evidence=None, verification=None):
+                    source, value='', evidence=None, verification=None,
+                    cwe=None, owasp=None, remediation=None, repro=None):
+        meta = self.FINDING_META.get(category, {})
+        evidence = evidence or {}
         key = f"{category}|{ftype}|{source}|{value}"
         return {
             'id': hashlib.sha256(key.encode('utf-8', 'ignore')).hexdigest()[:16],
@@ -10306,11 +10667,47 @@ class SecretScanner:
             'status': status if status in ('confirmed', 'potential', 'lead') else 'potential',
             'source': source or '',
             'value': (value if isinstance(value, str) else str(value))[:500],
-            'evidence': evidence or {},
+            'evidence': evidence,
             'verification': verification or {},
+            'cwe': cwe or meta.get('cwe', ''),
+            'owasp': owasp or meta.get('owasp', ''),
+            'remediation': remediation or meta.get('remediation', ''),
+            'repro': repro if repro is not None else self._build_repro(category, source, evidence),
             'tool': 'SecretPulse',
             'version': __version__,
         }
+
+    @staticmethod
+    def _shell_quote(value):
+        return "'" + str(value).replace("'", "'\\''") + "'"
+
+    def _build_repro(self, category, source, evidence):
+        """Build a safe, copy-ready request that reproduces the observation."""
+        source = source or ''
+        ev = evidence or {}
+        q = self._shell_quote
+        if category == 'cors':
+            origin = ev.get('origin_sent') or 'https://evil.example'
+            return f"curl -sS -D - -o /dev/null -H {q('Origin: ' + origin)} {q(source)}"
+        if category == 'redirect':
+            param, payload = ev.get('param'), ev.get('payload')
+            if param and payload and source:
+                sep = '&' if '?' in source else '?'
+                target = f"{source}{sep}{urlencode({param: payload})}"
+                return f"curl -sS -D - -o /dev/null {q(target)}"
+            return f"curl -sS -D - -o /dev/null {q(source)}"
+        if category == 'graphql':
+            body = '{"query":"{__schema{types{name}}}"}'
+            return (f"curl -sS -X POST -H 'Content-Type: application/json' "
+                    f"--data {q(body)} {q(source)}")
+        if category == 'takeover':
+            target = source if source.startswith(('http://', 'https://')) else f"https://{source}"
+            return f"curl -sS -D - {q(target)}"
+        if category in ('env', 'sensitive_file', 'swagger'):
+            return f"curl -sS {q(source)}"
+        if category in ('cloud_permissions', 'header'):
+            return f"curl -sS -D - -o /dev/null {q(source)}"
+        return ''
 
     def collect_findings(self):
         """Single source of truth for every module's findings.
@@ -10364,6 +10761,58 @@ class SecretScanner:
                           'verified_by': f.get('verified_by')},
             ))
 
+        # .env and sensitive-file exposure — validated HTTP 200 content
+        for ef in (getattr(self, 'env_files_found', None) or []):
+            keys = ', '.join(ef.get('sample_keys', [])[:5])
+            add(self._mk_finding(
+                'env', 'Exposed .env File', 'CRITICAL', 'HIGH', 'confirmed',
+                ef.get('url', ''), f"{ef.get('lines', 0)} vars: {keys}".strip(': '),
+                evidence=ef,
+            ))
+        for sf in (getattr(self, 'sensitive_files_found', None) or []):
+            add(self._mk_finding(
+                'sensitive_file', sf.get('type', 'Exposed Sensitive File'),
+                sf.get('severity', 'MEDIUM'), 'HIGH', 'confirmed',
+                sf.get('url', ''), sf.get('path', ''), evidence=sf,
+            ))
+
+        # GraphQL — merge the lightweight and full-schema probes by URL
+        gql_map = {}
+        for g in (getattr(self, 'graphql_endpoints', None) or []):
+            entry = gql_map.setdefault(g.get('url', ''), {'types': 0, 'mutations': []})
+            entry['types'] = max(entry['types'], g.get('types_count', 0))
+        for s in (getattr(getattr(self, 'api_discovery', None), 'graphql_schemas', None) or []):
+            entry = gql_map.setdefault(s.get('url', ''), {'types': 0, 'mutations': []})
+            entry['types'] = max(entry['types'], s.get('types', 0))
+            entry['mutations'] = s.get('mutations') or entry['mutations']
+            entry.update({k: v for k, v in s.items() if k not in ('url', 'types', 'mutations')})
+        for url, info in gql_map.items():
+            mutations = info.get('mutations') or []
+            add(self._mk_finding(
+                'graphql', 'GraphQL Introspection Enabled',
+                'HIGH' if mutations else 'MEDIUM', 'HIGH', 'confirmed',
+                url, f"{info.get('types', 0)} types, {len(mutations)} mutations",
+                evidence=info,
+                verification={'detail': 'Introspection response returned schema data'},
+            ))
+
+        # Swagger/OpenAPI specs — public schema exposure
+        for spec in (getattr(getattr(self, 'api_discovery', None), 'swagger_specs', None) or []):
+            add(self._mk_finding(
+                'swagger', 'Exposed OpenAPI Schema', 'MEDIUM', 'HIGH', 'confirmed',
+                spec.get('url', ''),
+                f"{spec.get('title', 'N/A')} ({spec.get('endpoints', 0)} endpoints)",
+                evidence=spec,
+                verification={'detail': 'Valid OpenAPI document returned over HTTP'},
+            ))
+
+        # gRPC indicators extracted from client bundles are unverified leads
+        for g in (getattr(getattr(self, 'api_discovery', None), 'grpc_endpoints', None) or []):
+            add(self._mk_finding(
+                'grpc', 'gRPC Service Indicator', 'INFO', 'LOW', 'lead',
+                g.get('source', ''), g.get('indicator', ''), evidence=g,
+            ))
+
         # Cloud-native findings are regex indicators, not confirmed exposure
         cloud_findings = getattr(getattr(self, 'cloud_scanner', None), 'findings', None) or []
         for f in cloud_findings:
@@ -10402,12 +10851,17 @@ class SecretScanner:
                 'MEDIUM', 'potential', f"npm:{pkg}", pkg, evidence=f,
             ))
 
-        # Subdomain takeover signatures and dangling DNS are indicators only
+        # Subdomain takeover — CNAME to a claimable service plus fingerprint
         for f in (getattr(getattr(self, 'subtko', None), 'findings', None) or []):
-            signature = f.get('signature', 'Dangling subdomain')
+            status = f.get('status', 'lead')
+            value = f"{f.get('service', '')} via {f.get('cname', '')}".strip(' via')
+            value = value or f.get('signature', 'Dangling subdomain')
             add(self._mk_finding(
-                'takeover', 'Subdomain Takeover Indicator', f.get('severity', 'INFO'),
-                'MEDIUM', 'lead', f.get('domain', ''), signature, evidence=f,
+                'takeover',
+                'Subdomain Takeover' if status != 'lead' else 'Subdomain Takeover Lead',
+                f.get('severity', 'INFO'), f.get('confidence', 'MEDIUM'), status,
+                f.get('domain', ''), value, evidence=f,
+                verification={'detail': f.get('signature', '')},
             ))
 
         # Security header findings
@@ -10493,6 +10947,7 @@ class SecretScanner:
             'api_endpoints': self.discovered_endpoints,
             'internal_urls': self.discovered_internal_urls,
             'env_files': self.env_files_found,
+            'sensitive_files': self.sensitive_files_found,
             'graphql_endpoints': self.graphql_endpoints,
             'google_scope_results': self.google_scope_results,
             'source_map_intel': self.source_map_intel,
@@ -10773,19 +11228,47 @@ class SecretScanner:
             stat_c = {'confirmed': '#dc3545', 'potential': '#fd7e14', 'lead': '#6c757d'}
             disc_html += (f'<h2>Exposure Findings ({len(module_findings)})</h2>'
                           '<table><tr><th>Severity</th><th>Status</th><th>Category</th>'
-                          '<th>Type</th><th>Source</th><th>Detail</th></tr>')
+                          '<th>Type / CWE</th><th>Source</th><th>Evidence</th><th>Repro</th></tr>')
             for f in sorted(module_findings,
                             key=lambda x: self.SEVERITY_RANK.get(x['severity'], 4)):
                 sc = stat_c.get(f['status'], '#6c757d')
+                ev_items = []
+                for k, val in (f.get('evidence') or {}).items():
+                    if val in (None, '', [], {}, False):
+                        continue
+                    if any(marker in k.lower() for marker in
+                           ('secret', 'token', 'password', 'authorization')):
+                        val = '[redacted]'
+                    elif isinstance(val, (dict, list)):
+                        val = json.dumps(val, default=str)
+                    ev_items.append(f'{k}={val}')
+                ev_text = '; '.join(ev_items)[:240]
+                repro = f.get('repro') or ''
+                cwe = f.get('cwe') or ''
+                owasp = f.get('owasp') or ''
+                remediation = f.get('remediation') or ''
+                display_value = ('weak HMAC secret confirmed'
+                                 if f['category'] == 'jwt' and f['status'] == 'confirmed'
+                                 else f['value'])
+                fix_html = (f'<br><small style="color:#6c757d">fix: '
+                            f'{html_lib.escape(remediation)}</small>') if remediation else ''
+                ev_html = (f'<br><small style="color:#6c757d">'
+                           f'{html_lib.escape(ev_text)}</small>') if ev_text else ''
+                repro_html = (f'<code style="white-space:pre-wrap">'
+                              f'{html_lib.escape(repro)}</code>') if repro else ''
                 disc_html += (
                     f'<tr><td><span class="badge" style="background:'
                     f'{sev_c.get(f["severity"], "#6c757d")}">{html_lib.escape(f["severity"])}</span></td>'
                     f'<td><span class="badge" style="background:{sc}">'
                     f'{html_lib.escape(f["status"])}</span></td>'
                     f'<td>{html_lib.escape(f["category"])}</td>'
-                    f'<td>{html_lib.escape(f["type"])}</td>'
-                    f'<td class="src">{html_lib.escape(f["source"][:80])}</td>'
-                    f'<td>{html_lib.escape(f["value"][:140])}</td></tr>')
+                    f'<td>{html_lib.escape(f["type"])}'
+                    f'<br><small style="color:#8b949e">{html_lib.escape(cwe)}'
+                    f'{(" · " + html_lib.escape(owasp)) if owasp else ""}</small>'
+                    f'{fix_html}</td>'
+                    f'<td class="src">{html_lib.escape(f["source"][:100])}</td>'
+                    f'<td>{html_lib.escape(display_value[:160])}{ev_html}</td>'
+                    f'<td>{repro_html}</td></tr>')
             disc_html += '</table>'
 
         now = datetime.now(timezone.utc)
@@ -11218,6 +11701,8 @@ Examples:
             scanner.probe_env = 'probe_env' in active_modules
             scanner.probe_graphql = 'probe_graphql' in active_modules
             scanner.probe_swagger = 'probe_swagger' in active_modules
+            scanner.probe_sensitive = 'sensitive_files' in active_modules
+            scanner.enable_subtko = 'takeover' in active_modules
             scanner.enable_ssrf = 'ssrf_probe' in active_modules
             scanner.enable_fuzz_idor = 'fuzz_idor' in active_modules
             scanner.enable_cors = 'cors_check' in active_modules
