@@ -1,5 +1,12 @@
 # Changelog
 
+## v5.3.0 (2026-11-14)
+### Breaking Changes
+- CLI reduced to 16 flags: URLs, `-v`, `-o`, `--html`, `--sarif`, `--fail-on`, `--scope`, `--verify`, `--smart`, `--path`, `--git`, `--git-max-commits`, `--gitleaks-config`, `--db`, `--diff`, `--baseline`
+- Removed standalone flags for crawl depth, workers, retries, rate limiting, UA rotation, `.env`/GraphQL/Swagger probes, custom rules, cloud-native scanning, webhooks, Wayback, takeover, SSRF/IDOR indicators, attack chains, target lists, PDF reports, CVE lookup, recon-only, database utilities, CORS, redirect, dependency confusion, JWT, cloud permissions, full mode, and CI/CD generators
+- Advanced web modules remain available through `--smart`, which selects them per target
+- Smart mode now lazily initializes cloud-native scanning instead of relying on the removed `--scan-cloud` flag
+
 ## v5.2.0 (2026-11-14)
 ### New Features
 - **Unified findings model** — secrets, CORS, redirects, JWT, dependency confusion, cloud permissions, takeover indicators, headers, and recon leads share one status model: `confirmed`, `potential`, or `lead`

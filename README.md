@@ -1,6 +1,6 @@
 # <img src="secretpulse-icon.svg" width="32" height="32" alt=""> SecretPulse — The Scanner That Proves It
 
-![Version](https://img.shields.io/badge/version-5.2.0-blue)
+![Version](https://img.shields.io/badge/version-5.3.0-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-Standard-cyan)
 ![Modules](https://img.shields.io/badge/modules-13-purple)
@@ -53,9 +53,9 @@ python3 SecretPulse.py https://target.com --smart
 python3 SecretPulse.py https://target.com \
   --smart \
   --db --diff \
-  --depth 2 \
   -o results.json \
-  --report html
+  --html report.html \
+  --fail-on high
 ```
 
 ---
@@ -81,19 +81,18 @@ python3 SecretPulse.py https://target.com \
 # Smart scan (recommended — selects modules per target)
 python3 SecretPulse.py https://target.com --smart
 
-# Individual modules
-python3 SecretPulse.py https://target.com --cors-check --jwt-exploit --open-redirect
+# Smart scan with active verification and a CI severity gate
+python3 SecretPulse.py https://target.com --smart --verify --fail-on high
 
 # Local files or git history (no network target required)
 python3 SecretPulse.py --path ./src --fail-on high
 python3 SecretPulse.py --git . --git-max-commits 200
 
-# Recon only (discover subdomains, don't scan)
-python3 SecretPulse.py target.com --recon-only --db
-
-# Stealth mode (WAF-heavy targets)
-python3 SecretPulse.py https://target.com --smart --workers 2 --rate-limit 2 --ua-rotate
+# Import Gitleaks TOML rules, including allowlists
+python3 SecretPulse.py --path ./src --gitleaks-config .gitleaks.toml
 ```
+
+Advanced modules — CORS, JWT, open redirect, cloud permissions, dependency confusion, SSRF/IDOR indicators, and subdomain takeover — are selected automatically by `--smart`. They are not exposed as separate flags.
 
 ---
 
@@ -127,28 +126,22 @@ python3 SecretPulse.py https://target.com --smart --workers 2 --rate-limit 2 --u
 
 | Flag | Description |
 |------|-------------|
-| `--smart` | Adaptive module selection per target (recommended) |
-| `--db` | Enable SQLite persistence |
-| `--diff` | Show delta vs previous scan |
-| `--depth N` | Crawl depth (0 = target only) |
-| `--workers N` | Concurrent workers (default 5) |
-| `--rate-limit N` | Rate limit (requests/sec, 0 = unlimited) |
-| `--ua-rotate` | Rotate User-Agent per request |
+| `URL...` | One or more targets to scan |
+| `-v, --verbose` | Verbose output |
 | `-o FILE` | JSON output |
+| `--html FILE` | HTML report |
 | `--sarif FILE` | SARIF 2.1.0 output for code scanning |
-| `--report html` | Generate HTML report |
+| `--fail-on LEVEL` | Exit 1 on confirmed/potential findings at or above LEVEL |
+| `--scope FILE` | Scope file (one domain per line) |
+| `--verify` | Active API verification (50 verifiers) |
+| `--smart` | Adaptive module selection per target (recommended) |
 | `--path PATH` | Scan a local file or directory |
 | `--git REPO` | Scan a local git repository's history |
+| `--git-max-commits N` | Max commits to inspect with `--git` (0 = all) |
 | `--gitleaks-config FILE` | Import Gitleaks TOML rules, including allowlists |
-| `--verify` | Active API verification (50 verifiers) |
-| `--cors-check` | CORS misconfiguration testing |
-| `--jwt-exploit` | JWT exploitation testing |
-| `--open-redirect` | Open redirect testing |
-| `--cloud-perms` | Read-only cloud permission checks (S3/GCS/Firebase) |
-| `--dep-confusion` | Dependency confusion checking |
-| `--recon-only` | Subdomain recon without scanning |
-| `--fail-on LEVEL` | Exit 1 on confirmed/potential findings at or above LEVEL |
-| `--db-stats` | Show database statistics |
+| `--db` | SQLite persistence |
+| `--diff` | Show delta vs previous scan |
+| `--baseline FILE` | Suppress baseline findings from the exit gate |
 
 ---
 

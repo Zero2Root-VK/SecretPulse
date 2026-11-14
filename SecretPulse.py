@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SecretPulse v5.2.0
+SecretPulse v5.3.0
 ════════════════════════════════════════════
 High-Signal Secret & API Exposure Scanner
 Designed to maximize bounty impact and minimize noise.
@@ -85,7 +85,7 @@ try:
 except ImportError:
     HAS_ASYNC = False
 
-__version__ = '5.2.0'
+__version__ = '5.3.0'
 __author__  = 'Vinod Kumar Bontha'
 __lines__   = '11,300+'
 
@@ -5935,8 +5935,8 @@ class SmartRouter:
     Intelligence-driven scanning. Analyzes each target and enables
     only the modules that make sense for that specific asset.
 
-    This is the core differentiator: not --full, but --smart.
-    Most tools scan everything everywhere. SecretPulse chooses.
+    This is the core differentiator: per-target module selection, not
+    blanket scanning. Most tools scan everything everywhere. SecretPulse chooses.
     """
 
     # Asset classification rules: pattern → asset type
@@ -10496,88 +10496,49 @@ def main():
 Author: {__author__}
 
 Examples:
-  %(prog)s https://example.com
-  %(prog)s https://example.com --verify --probe-env --probe-graphql --probe-swagger
-  %(prog)s https://example.com --depth 2 --workers 10 --ua-rotate --verify --scan-cloud
-  %(prog)s https://example.com --scope scope.txt --rate-limit 10 --notify https://hooks.slack.com/...
-  %(prog)s https://example.com --rules custom.yaml --sarif results.sarif --baseline prev.json
-  %(prog)s https://example.com --verify --cve-lookup --rate-abuse --report html
-  %(prog)s -L targets.txt --verify --depth 2 -o results.json --report both
-  %(prog)s -L - --verify < targets.txt
-  %(prog)s -f targets.txt -o results.json --html report.html --sarif ci.sarif
-  %(prog)s --generate-github-action
+  %(prog)s https://example.com --smart
+  %(prog)s https://example.com --smart --verify --fail-on high
+  %(prog)s https://example.com --scope scope.txt --baseline prev.json
+  %(prog)s https://example.com --smart -o results.json --html report.html
+  %(prog)s --path ./src --fail-on high
+  %(prog)s --git . --git-max-commits 200
         """
     )
     parser.add_argument('urls', nargs='*', help='URLs to scan')
-    parser.add_argument('--key', help='License key (ARC-XXXX-XXXX-...)')
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('-o', '--output', help='JSON output file')
     parser.add_argument('--html', help='HTML report file')
     parser.add_argument('--sarif', help='SARIF output file (for CI/CD)')
-    parser.add_argument('--no-validate', action='store_true')
-    parser.add_argument('-f', '--file', action='store_true', help='Read URLs from file')
-    parser.add_argument('--depth', type=int, default=0, help='Crawl depth')
-    parser.add_argument('--workers', type=int, default=5, help='Concurrent workers')
-    parser.add_argument('--retries', type=int, default=3, help='Max retries')
-    parser.add_argument('--ua-rotate', action='store_true')
-    parser.add_argument('--probe-env', action='store_true', help='Probe for .env files')
-    parser.add_argument('--probe-graphql', action='store_true', help='Probe GraphQL endpoints')
-    parser.add_argument('--probe-swagger', action='store_true', help='Probe Swagger/OpenAPI specs')
-    parser.add_argument('--verify', action='store_true', help='Active API verification (50 verifiers)')
-    parser.add_argument('--rate-limit', type=float, default=0, help='Requests per second (0=unlimited)')
+    parser.add_argument('--fail-on', choices=['none', 'critical', 'high', 'medium', 'low', 'any'],
+                        default='none',
+                        help='Exit 1 when confirmed/potential findings meet this severity (CI gate)')
     parser.add_argument('--scope', help='Scope file (one domain per line)')
-    parser.add_argument('--rules', help='Custom rules file (YAML or JSON)')
-    parser.add_argument('--gitleaks-config', help='Import Gitleaks TOML rules')
-    parser.add_argument('--no-progress', action='store_true')
-    parser.add_argument('--scan-cloud', action='store_true', help='Cloud native scanning (AWS/K8s/GCP)')
-    parser.add_argument('--notify', help='Webhook URL (Slack/Discord/Teams)')
-    parser.add_argument('--baseline', help='Baseline JSON for diff detection')
-    # v4.0: Offensive Recon
-    parser.add_argument('--wayback', action='store_true', help='Mine Wayback Machine for historical JS/HTML')
-    parser.add_argument('--subtko', action='store_true', help='Check for dangling DNS / unclaimed subdomains')
-    parser.add_argument('--ssrf-probe', action='store_true', help='Detect SSRF indicators in JavaScript (unverified leads)')
-    parser.add_argument('--fuzz-idor', action='store_true', help='Collect IDOR/BOLA candidates (unverified leads)')
-    parser.add_argument('--attack-chains', action='store_true', help='Map risk impact chains with exploitability scoring')
-    # v5.0: New features
-    parser.add_argument('-L', '--target-list', help='File with target URLs (one per line), use - for stdin')
+    parser.add_argument('--verify', action='store_true', help='Active API verification (50 verifiers)')
+    parser.add_argument('--smart', action='store_true',
+                        help='Intelligence-driven scanning: auto-selects modules per target')
     parser.add_argument('--path', help='Scan a local file or directory for secrets')
     parser.add_argument('--git', help='Scan a local git repository history for secrets')
     parser.add_argument('--git-max-commits', type=int, default=500,
                         help='Max commits to inspect with --git (0 = all)')
-    parser.add_argument('--report', choices=['html', 'pdf', 'both'], help='Generate visual report (html/pdf/both)')
-    parser.add_argument('--rate-abuse', action='store_true', help='Check rate limit protection on verified keys (safe mode)')
-    parser.add_argument('--cve-lookup', action='store_true', help='CVE lookup for source map npm packages')
-    # Phase 1: Recon & Infrastructure
-    parser.add_argument('--recon', action='store_true', help='Run subdomain recon (CT logs + DNS + risk scoring)')
-    parser.add_argument('--recon-only', action='store_true', help='Only run recon, do not scan')
-    parser.add_argument('--recon-top', type=int, default=0, help='Scan only top N high-risk subdomains')
+    parser.add_argument('--gitleaks-config', help='Import Gitleaks TOML rules')
     parser.add_argument('--db', action='store_true', help='Enable SQLite persistence and scan history')
-    parser.add_argument('--db-stats', action='store_true', help='Show database statistics and exit')
-    parser.add_argument('--db-history', action='store_true', help='Show scan history and exit')
     parser.add_argument('--diff', action='store_true', help='Show delta vs previous scan (requires --db)')
-    parser.add_argument('--fail-on', choices=['none', 'critical', 'high', 'medium', 'low', 'any'],
-                        default='none',
-                        help='Exit 1 when confirmed/potential findings meet this severity (CI gate)')
-    # v6.0: Exposure scanning
-    parser.add_argument('--cors-check', action='store_true', help='Test for CORS misconfigurations')
-    parser.add_argument('--open-redirect', action='store_true', help='Test for open redirect vulnerabilities')
-    parser.add_argument('--dep-confusion', action='store_true', help='Check npm packages for dependency confusion')
-    parser.add_argument('--jwt-exploit', action='store_true', help='Deep JWT exploitation testing')
-    parser.add_argument('--cloud-perms', action='store_true', help='Read-only cloud permission checks (S3/GCS/Firebase)')
-    parser.add_argument('--full', action='store_true', help='Enable ALL scanning modules (noisy — prefer --smart)')
-    parser.add_argument('--smart', action='store_true',
-                        help='Intelligence-driven scanning: auto-selects modules per target based on asset type')
-    # CI/CD generators
-    parser.add_argument('--generate-github-action', action='store_true',
-                        help='Generate GitHub Actions workflow')
-    parser.add_argument('--generate-gitlab-ci', action='store_true',
-                        help='Generate GitLab CI pipeline')
-    parser.add_argument('--generate-pre-commit', action='store_true',
-                        help='Generate pre-commit hook script')
+    parser.add_argument('--baseline', help='Baseline JSON for diff detection')
+
+    parser.set_defaults(
+        no_validate=False, depth=0, workers=5,
+        retries=3, ua_rotate=False, probe_env=False, probe_graphql=False,
+        probe_swagger=False, rate_limit=0, rules=None, no_progress=False,
+        scan_cloud=False, notify=None, wayback=False, subtko=False,
+        ssrf_probe=False, fuzz_idor=False, attack_chains=False,
+        rate_abuse=False, cve_lookup=False,
+        recon=False, cors_check=False, open_redirect=False,
+        dep_confusion=False, jwt_exploit=False, cloud_perms=False,
+    )
 
     args = parser.parse_args()
 
-    # ── --smart flag: intelligence-driven (NOT --full) ──
+    # ── --smart flag: intelligence-driven ──
     if args.smart:
         args.recon = True
         args.db = True
@@ -10585,71 +10546,7 @@ Examples:
         # Don't enable any exposure modules globally —
         # SmartRouter will enable them per-target
 
-    # ── --full flag: enable everything (noisy fallback) ──
-    if args.full:
-        # Standard: verify/attack-chains/cve/wayback/rate-abuse gated below
-        args.probe_env = True
-        args.probe_graphql = True
-        args.probe_swagger = True
-        args.scan_cloud = True
-        args.subtko = True
-        args.ssrf_probe = True
-        args.fuzz_idor = True
-        args.recon = True
-        args.db = True
-        args.cors_check = True
-        args.open_redirect = True
-        args.dep_confusion = True
-        args.jwt_exploit = True
-        args.cloud_perms = True
-
-    # ── Database utility commands (no scan needed) ──
-    if args.db_stats:
-        try:
-            db = SecretPulseDB()
-            stats = db.get_stats()
-            print(f"\n  SecretPulse Database Statistics")
-            print(f"  {'=' * 35}")
-            print(f"  Total scans:       {stats['total_scans']}")
-            print(f"  Total subdomains:  {stats['total_subdomains']}")
-            print(f"  Alive subdomains:  {stats['alive_subdomains']}")
-            print(f"  Unique domains:    {stats['unique_domains']}")
-            print(f"  Total findings:    {stats['total_findings']}")
-            print(f"  Active findings:   {stats['active_findings']}")
-            print(f"  DB location:       {db.db_path}")
-            db.close()
-        except Exception as e:
-            print(f"  Error: {e}")
-        return
-
-    if args.db_history:
-        try:
-            db = SecretPulseDB()
-            history = db.get_scan_history(limit=20)
-            print(f"\n  Recent Scans (last 20)")
-            print(f"  {'=' * 60}")
-            for scan in history:
-                dur = f"{scan['duration_seconds']:.1f}s" if scan['duration_seconds'] else "?"
-                print(f"  #{scan['id']:4d}  {scan['target'][:40]:40s}  "
-                      f"findings:{scan['findings_count']:3d}  {dur}")
-            db.close()
-        except Exception as e:
-            print(f"  Error: {e}")
-        return
-
-    # ── CI/CD generators (no scan needed) ──
-    if args.generate_github_action:
-        CICDIntegration.generate_github_action()
-        return
-    if args.generate_gitlab_ci:
-        CICDIntegration.generate_gitlab_ci()
-        return
-    if args.generate_pre_commit:
-        CICDIntegration.generate_pre_commit_hook()
-        return
-
-    if (not args.urls and not getattr(args, 'key', None) and not args.target_list
-            and not args.path and not args.git):
+    if not args.urls and not args.path and not args.git:
         parser.print_help()
         return
 
@@ -10737,21 +10634,7 @@ Examples:
     )
 
     urls_to_scan = []
-    if args.target_list:
-        # v5.0: Multi-target batch scanning
-        raw_targets = BatchScanner.load_targets(args.target_list)
-        urls_to_scan = [u for u in (validate_target(t) for t in raw_targets) if u]
-        if not urls_to_scan:
-            print(f"{Colors.FAIL}[!] No valid targets loaded from {args.target_list}{Colors.ENDC}")
-            sys.exit(2)
-        rejected = len(raw_targets) - len(urls_to_scan)
-        print(f"[*] Batch mode: {len(urls_to_scan)} valid targets loaded", end='')
-        if rejected > 0:
-            print(f" ({rejected} rejected)")
-        else:
-            print()
-        print()
-    elif args.file or (len(args.urls) == 1 and args.urls[0].endswith('.txt')):
+    if len(args.urls) == 1 and args.urls[0].endswith('.txt'):
         try:
             with open(args.urls[0]) as f:
                 raw_lines = [l.strip() for l in f if l.strip() and not l.startswith('#')]
@@ -10822,7 +10705,7 @@ Examples:
         print(f"[*] Notifications: {args.notify[:50]}...")
     if args.baseline:
         print(f"[*] Baseline: {args.baseline}")
-    if args.recon or args.recon_only:
+    if args.recon:
         print(f"[*] Subdomain recon: ON (CT logs + DNS + risk scoring)")
     if args.db:
         print(f"[*] SQLite persistence: ON (~/.SecretPulse/SecretPulse.db)")
@@ -10843,7 +10726,7 @@ Examples:
     # ── Phase 1: Subdomain Recon ──
     scan_id = None
     recon_urls = []
-    if args.recon or args.recon_only:
+    if args.recon:
         # Extract domain from first target
         first_target = urls_to_scan[0] if urls_to_scan else ''
         target_domain = urlparse(first_target).netloc if first_target else ''
@@ -10855,20 +10738,7 @@ Examples:
             discovered = recon.discover(target_domain)
 
             if discovered:
-                # Get URLs to scan (prioritized by risk)
-                top_n = args.recon_top if args.recon_top > 0 else None
-                recon_urls = recon.get_scan_urls(top_n=top_n)
-
-                if args.recon_only:
-                    # Store results and exit
-                    if db:
-                        db.close()
-                    print(f"\n{Colors.OKGREEN}[+] Recon complete. "
-                          f"Found {len(discovered)} live subdomains.{Colors.ENDC}")
-                    if db:
-                        print(f"    Results saved to ~/.SecretPulse/SecretPulse.db")
-                        print(f"    Run with --db-stats to see database overview")
-                    return
+                recon_urls = recon.get_scan_urls()
 
                 # Add recon URLs to scan queue (avoid duplicates)
                 existing = set(urls_to_scan)
@@ -10880,12 +10750,6 @@ Examples:
                 if recon_urls:
                     print(f"{Colors.OKGREEN}[+] Added {len(recon_urls)} subdomain URLs "
                           f"to scan queue{Colors.ENDC}\n")
-
-    if args.recon_only:
-        print(f"\n{Colors.OKBLUE}[*] Recon complete. No live subdomains discovered.{Colors.ENDC}")
-        if db:
-            db.close()
-        return
 
     # ── Smart Router: Build per-target scan plan ──
     smart_plan = []
@@ -10942,6 +10806,8 @@ Examples:
                 scanner.redirect_detector = OpenRedirectDetector(scanner.session, scanner.rate_limiter, scanner.verbose)
             if scanner.enable_cloud_perms and not getattr(scanner, 'cloud_perm_tester', None):
                 scanner.cloud_perm_tester = CloudPermissionTester(scanner.session, scanner.rate_limiter, scanner.verbose)
+            if 'scan_cloud' in active_modules and not scanner.cloud_scanner:
+                scanner.cloud_scanner = CloudNativeScanner()
 
         scanner.scan_url(url, depth=0)
 
@@ -11276,20 +11142,6 @@ Examples:
         scanner.export_html(args.html)
     if args.sarif:
         export_sarif(scanner.collect_findings(), scanner.stats, args.sarif)
-
-    # v5.0: Enhanced report generation
-    if args.report:
-        report_base = args.output.replace('.json', '') if args.output else 'scan_report'
-        if args.report in ('html', 'both'):
-            html_report = f"{report_base}_v5.html"
-            # Use existing HTML export enhanced with v5.0 data
-            scanner.export_html(html_report)
-        if args.report in ('pdf', 'both'):
-            html_for_pdf = f"{report_base}_v5.html"
-            if not Path(html_for_pdf).exists():
-                scanner.export_html(html_for_pdf)
-            pdf_path = f"{report_base}_v5.pdf"
-            ReportGenerator.generate_pdf(html_for_pdf, pdf_path)
 
     # v3.0: Webhook notification
     if scanner.notifier:
