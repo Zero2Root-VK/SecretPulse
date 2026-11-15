@@ -1,6 +1,6 @@
 # <img src="secretpulse-icon.svg" width="32" height="32" alt=""> SecretPulse — The Scanner That Proves It
 
-![Version](https://img.shields.io/badge/version-5.6.0-blue)
+![Version](https://img.shields.io/badge/version-5.6.1-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-Standard-cyan)
 ![Findings](https://img.shields.io/badge/findings-unified-purple)
@@ -313,7 +313,7 @@ Advanced modules — CORS, JWT, open redirect, cloud permissions, dependency con
 
 **Vinod Kumar Bontha**
 
-Built as a modular Python source tree and shipped as one generated standalone file. 12,000+ lines. No frameworks. No backend service. No telemetry.
+SecretPulse is a modular Python source tree shipped as one generated standalone file. No frameworks. No backend service. No telemetry.
 
 For authorized security testing only.
 

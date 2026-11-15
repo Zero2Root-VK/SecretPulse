@@ -3,6 +3,13 @@ from ._imports import *
 from .storage import SecretPulseDB
 from .utils import Colors
 
+import urllib3
+
+# Recon probes skip certificate validation on purpose: expired, self-signed, and
+# mismatched certificates are themselves takeover signals. Silence the warnings
+# that requests would otherwise print for every such host.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 class CertTransparency:
     """
     Query Certificate Transparency logs (crt.sh) to discover subdomains.

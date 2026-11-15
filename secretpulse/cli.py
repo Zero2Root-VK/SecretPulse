@@ -884,15 +884,3 @@ Examples:
             print(f"{Colors.OKGREEN}[+] Exit 0: no confirmed/potential findings "
                   f"at or above {args.fail_on}{Colors.ENDC}")
         sys.exit(code)
-
-
-def _print_upgrade_banner():
-    """Show upgrade prompt after scan completes."""
-    pass
-
-
-# Patch main to show upgrade banner after scan
-_original_main = main
-
-def main():
-    _original_main()

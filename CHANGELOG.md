@@ -1,5 +1,16 @@
 # Changelog
 
+## v5.6.1 (2026-11-15)
+### Security Fixes
+- Removed shell-style interpolation of report paths in PDF conversion; engine scripts now receive paths as process arguments through `sys.executable`, so crafted `--html`/`--pdf` values cannot inject code
+- Removed the unused offline licensing module and its hardcoded salt; SecretPulse is a single Standard License build with no dormant key validation or feature gating
+- Cleaned repository ignore rules to cover `.env`, key material, databases, and scan artifacts without hiding benchmark fixtures
+
+### Maintenance
+- Removed the no-op CLI upgrade wrapper
+- Aligned CI with the documented Python support range by testing 3.8 and 3.9 on Ubuntu 22.04 alongside 3.10, 3.12, and 3.13
+- Removed stale line-count metadata from version constants and documentation
+
 ## v5.6.0 (2026-11-15)
 ### Signal Quality
 - Added explicit public-identifier classification for 14 browser and ingestion identifiers, including Stripe publishable keys, Mapbox public tokens, Google/Firebase client keys, Sentry DSNs, Datadog RUM tokens, analytics project IDs, and auth/widget client IDs
@@ -54,7 +65,7 @@
 - PEM private-key findings now validate the header regardless of whether the full key body was captured
 
 ### Modular Source Layout
-- Moved the 12,000+ line monolith into 14 focused modules under `secretpulse/` while preserving the standalone `python3 SecretPulse.py` distribution
+- Moved the monolith into focused modules under `secretpulse/` while preserving the standalone `python3 SecretPulse.py` distribution
 - Added `build_secretpulse.py` to bundle the modular source deterministically into `SecretPulse.py`, with `--check` for CI staleness detection
 - Added `python3 -m secretpulse` as an equivalent package entrypoint
 - Added layout tests that verify the bundle is current, standalone, and exports the core scanner components

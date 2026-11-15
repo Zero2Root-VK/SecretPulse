@@ -1,5 +1,6 @@
 """Ensure the modular source and generated single-file distribution stay in sync."""
 
+import ast
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,10 @@ class ModularLayoutTests(unittest.TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual, build_secretpulse.render())
 
+    def test_bundle_parses_with_documented_python_38_grammar(self):
+        source = (ROOT / 'SecretPulse.py').read_text()
+        ast.parse(source, filename='SecretPulse.py', feature_version=(3, 8))
+
     def test_bundle_is_standalone(self):
         source = (ROOT / 'SecretPulse.py').read_text()
         self.assertNotIn('from .', source)
@@ -29,7 +34,7 @@ class ModularLayoutTests(unittest.TestCase):
         from secretpulse.scanner import SecretScanner
         from secretpulse.verification import ActiveVerifierV2
 
-        self.assertEqual(__version__, '5.6.0')
+        self.assertEqual(__version__, '5.6.1')
         self.assertTrue(callable(main))
         for component in (AccuracyEngine, FalsePositiveFilter,
                           SecretScanner, ActiveVerifierV2):

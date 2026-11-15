@@ -1,26 +1,48 @@
-# Arcanis
+# Local credentials and key material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Scan output and databases
 *.json
 *.html
 *.pdf
 *.sarif
 keys.csv
-Arcanis.py
-keygen.py
-build_pro.py
-build_free.py
-build_both.py
+*.db
+*.sqlite
+*.sqlite3
+SecretPulse.db
 
-# Benchmark corpus fixtures (generated artifacts remain ignored)
+# Benchmark fixtures are intentionally tracked
 !benchmarks/corpus/**/*.json
+!benchmarks/corpus/**/.env
+!benchmarks/corpus/**/*.pem
+!benchmarks/corpus/**/package-lock.json
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 *.egg-info/
 dist/
 build/
 *.spec
+.venv/
+venv/
+
+# Test and tooling caches
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # IDE
 .vscode/
@@ -31,7 +53,3 @@ build/
 # OS
 .DS_Store
 Thumbs.db
-
-# Arcanis data
-.arcanis/
-arcanis.db

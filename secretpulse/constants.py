@@ -1,9 +1,8 @@
 """Version metadata, detection constants, and probe tables."""
 from ._imports import *
 
-__version__ = '5.6.0'
+__version__ = '5.6.1'
 __author__  = 'Vinod Kumar Bontha'
-__lines__   = '12,000+'
 
 UA_POOL = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SecretPulse v5.6.0 — High-Signal Secret & API Exposure Scanner.
+"""SecretPulse v5.6.1 — High-Signal Secret & API Exposure Scanner.
 
 Generated single-file distribution. Source of truth: secretpulse/.
 Rebuild with: python3 build_secretpulse.py
@@ -51,9 +51,8 @@ except ImportError:
 
 # ═══ module: constants ═══════════════════════════════════════════════════════
 
-__version__ = '5.6.0'
+__version__ = '5.6.1'
 __author__  = 'Vinod Kumar Bontha'
-__lines__   = '12,000+'
 
 UA_POOL = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -585,126 +584,6 @@ class JWTAnalyzer:
 def decode_jwt(token: str) -> Optional[Dict]:
     """Wrapper for backward compatibility."""
     return JWTAnalyzer.analyze(token)
-
-# ═══ module: license ═══════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════════════
-#  License Key Validation
-# ═══════════════════════════════════════════════════════════════════
-
-import hmac as _hmac
-
-# This is baked into the binary — change before distributing
-_LICENSE_SALT = "a7c3f9e1b2d4806573cafe9182736455"
-
-_LICENSE_DIR  = os.path.join(str(Path.home()), ".SecretPulse")
-_LICENSE_FILE = os.path.join(_LICENSE_DIR, "license")
-
-_PLANS = {
-    "starter":  ["scan", "verify", "json"],
-    "pro":      ["scan", "verify", "json", "html", "pdf", "sarif",
-                 "wayback", "cve", "batch", "attack_chains"],
-    "lifetime": ["scan", "verify", "json", "html", "pdf", "sarif",
-                 "wayback", "cve", "batch", "attack_chains"],
-    "free":     ["scan", "verify", "json", "html", "pdf", "sarif",
-                 "wayback", "cve", "batch", "attack_chains"],
-}
-
-
-def _key_decode(key: str) -> Optional[dict]:
-    """Decode and verify a license key. Returns payload or None."""
-    try:
-        # Strip prefix and dashes: ARC-xxxx-xxxx-... -> raw
-        raw = key.replace("ARC-", "").replace("-", "")
-        if len(raw) < 20:
-            return None
-
-        # Last 16 chars = signature, rest = payload
-        payload_b64 = raw[:-16]
-        sig_given = raw[-16:]
-
-        # Verify HMAC signature
-        sig_expected = _hmac.new(
-            _LICENSE_SALT.encode(),
-            payload_b64.encode(),
-            hashlib.sha256
-        ).hexdigest()[:16]
-
-        if not _hmac.compare_digest(sig_given, sig_expected):
-            return None
-
-        # Decode payload
-        padded = payload_b64 + "=" * (4 - len(payload_b64) % 4)
-        payload_json = base64.urlsafe_b64decode(padded).decode()
-        payload = json.loads(payload_json)
-
-        # Expand plan initial to full name
-        plan_map = {"s": "starter", "p": "pro", "l": "lifetime"}
-        p = payload.get("p", "")
-        if p in plan_map:
-            payload["p"] = plan_map[p]
-
-        return payload
-    except Exception:
-        return None
-
-
-def _key_validate(key: str) -> Tuple[bool, str, Optional[dict]]:
-    """
-    Validate a license key.
-    Returns: (valid, message, payload)
-    """
-    payload = _key_decode(key)
-    if payload is None:
-        return False, "Invalid license key.", None
-
-    # Check expiry
-    expires = payload.get("x", 0)
-    now = int(time.time())
-    if now > expires:
-        from datetime import datetime as _dt
-        exp_date = _dt.fromtimestamp(expires).strftime("%Y-%m-%d")
-        return False, f"License expired on {exp_date}. Renew at https://SecretPulse.sh", None
-
-    return True, "Valid", payload
-
-
-def _key_save(key: str):
-    """Save key locally so user doesn't retype every time."""
-    os.makedirs(_LICENSE_DIR, mode=0o700, exist_ok=True)
-    with open(_LICENSE_FILE, "w") as f:
-        f.write(key.strip())
-    os.chmod(_LICENSE_FILE, 0o600)
-
-
-def _key_load() -> Optional[str]:
-    """Load saved key, or from env var."""
-    # 1. Environment variable
-    env_key = os.environ.get("SecretPulse_KEY")
-    if env_key:
-        return env_key.strip()
-    # 2. Saved file
-    if os.path.exists(_LICENSE_FILE):
-        with open(_LICENSE_FILE) as f:
-            return f.read().strip()
-    return None
-
-
-def _key_check_feature(payload: dict, feature: str) -> bool:
-    """Check if the license includes a specific feature."""
-    plan = payload.get("p", "")
-    allowed = _PLANS.get(plan, [])
-    return feature in allowed
-
-
-def _license_gate(args) -> Optional[dict]:
-    """
-    Standard License.
-    Returns a free-tier payload with all features unlocked.
-    """
-    print(f"  License: {Colors.OKGREEN}Standard{Colors.ENDC}")
-    print()
-    return {"p": "free", "x": 9999999999, "e": "standard"}
 
 # ═══ module: verification ═══════════════════════════════════════════════════════
 
@@ -5867,6 +5746,13 @@ class SecretPulseDB:
 
 # ═══ module: recon ═══════════════════════════════════════════════════════
 
+import urllib3
+
+# Recon probes skip certificate validation on purpose: expired, self-signed, and
+# mismatched certificates are themselves takeover signals. Silence the warnings
+# that requests would otherwise print for every such host.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 class CertTransparency:
     """
     Query Certificate Transparency logs (crt.sh) to discover subdomains.
@@ -7698,11 +7584,13 @@ class ReportGenerator:
 
         # Engine 1: weasyprint (best quality)
         try:
-            subprocess.run(['python3', '-c', 'import weasyprint'], check=True,
+            subprocess.run([sys.executable, '-c', 'import weasyprint'], check=True,
                            capture_output=True, timeout=5)
             result = subprocess.run([
-                'python3', '-c',
-                f"import weasyprint; weasyprint.HTML(filename='{html_path}').write_pdf('{pdf_path}')"
+                sys.executable, '-c',
+                'import sys, weasyprint; '
+                'weasyprint.HTML(filename=sys.argv[1]).write_pdf(sys.argv[2])',
+                html_path, pdf_path,
             ], check=True, capture_output=True, timeout=120)
             print(f"{Colors.OKGREEN}[+] PDF: {pdf_path} (weasyprint){Colors.ENDC}")
             return True
@@ -7743,15 +7631,16 @@ class ReportGenerator:
 
         # Engine 4: xhtml2pdf (pure Python fallback — no system deps)
         try:
-            subprocess.run(['python3', '-c', 'import xhtml2pdf'], check=True,
+            subprocess.run([sys.executable, '-c', 'import xhtml2pdf'], check=True,
                            capture_output=True, timeout=5)
             conv_script = (
-                f"from xhtml2pdf import pisa; "
-                f"src = open('{html_path}', 'r', encoding='utf-8').read(); "
-                f"out = open('{pdf_path}', 'wb'); "
-                f"pisa.CreatePDF(src, dest=out); out.close()"
+                'import sys\n'
+                'from xhtml2pdf import pisa\n'
+                'with open(sys.argv[1], encoding="utf-8") as src, '
+                'open(sys.argv[2], "wb") as out:\n'
+                '    pisa.CreatePDF(src.read(), dest=out)\n'
             )
-            subprocess.run(['python3', '-c', conv_script],
+            subprocess.run([sys.executable, '-c', conv_script, html_path, pdf_path],
                            check=True, capture_output=True, timeout=120)
             if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 100:
                 print(f"{Colors.OKGREEN}[+] PDF: {pdf_path} (xhtml2pdf){Colors.ENDC}")
@@ -12676,18 +12565,6 @@ Examples:
             print(f"{Colors.OKGREEN}[+] Exit 0: no confirmed/potential findings "
                   f"at or above {args.fail_on}{Colors.ENDC}")
         sys.exit(code)
-
-
-def _print_upgrade_banner():
-    """Show upgrade prompt after scan completes."""
-    pass
-
-
-# Patch main to show upgrade banner after scan
-_original_main = main
-
-def main():
-    _original_main()
 
 if __name__ == '__main__':
     main()

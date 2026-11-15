@@ -16,7 +16,6 @@ MODULES = (
     'constants',
     'utils',
     'jwt',
-    'license',
     'verification',
     'analysis',
     'discovery',

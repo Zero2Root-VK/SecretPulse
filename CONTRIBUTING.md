@@ -6,7 +6,7 @@ enables unauthorized access or destructive behavior.
 
 ## Development setup
 
-Requirements: Python 3.8+ and `git`. CI covers Python 3.10 through 3.13.
+Requirements: Python 3.8+ and `git`. CI covers Python 3.8 through 3.13.
 
 ```bash
 python3 -m venv .venv

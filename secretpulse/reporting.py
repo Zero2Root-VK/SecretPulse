@@ -133,11 +133,13 @@ class ReportGenerator:
 
         # Engine 1: weasyprint (best quality)
         try:
-            subprocess.run(['python3', '-c', 'import weasyprint'], check=True,
+            subprocess.run([sys.executable, '-c', 'import weasyprint'], check=True,
                            capture_output=True, timeout=5)
             result = subprocess.run([
-                'python3', '-c',
-                f"import weasyprint; weasyprint.HTML(filename='{html_path}').write_pdf('{pdf_path}')"
+                sys.executable, '-c',
+                'import sys, weasyprint; '
+                'weasyprint.HTML(filename=sys.argv[1]).write_pdf(sys.argv[2])',
+                html_path, pdf_path,
             ], check=True, capture_output=True, timeout=120)
             print(f"{Colors.OKGREEN}[+] PDF: {pdf_path} (weasyprint){Colors.ENDC}")
             return True
@@ -178,15 +180,16 @@ class ReportGenerator:
 
         # Engine 4: xhtml2pdf (pure Python fallback — no system deps)
         try:
-            subprocess.run(['python3', '-c', 'import xhtml2pdf'], check=True,
+            subprocess.run([sys.executable, '-c', 'import xhtml2pdf'], check=True,
                            capture_output=True, timeout=5)
             conv_script = (
-                f"from xhtml2pdf import pisa; "
-                f"src = open('{html_path}', 'r', encoding='utf-8').read(); "
-                f"out = open('{pdf_path}', 'wb'); "
-                f"pisa.CreatePDF(src, dest=out); out.close()"
+                'import sys\n'
+                'from xhtml2pdf import pisa\n'
+                'with open(sys.argv[1], encoding="utf-8") as src, '
+                'open(sys.argv[2], "wb") as out:\n'
+                '    pisa.CreatePDF(src.read(), dest=out)\n'
             )
-            subprocess.run(['python3', '-c', conv_script],
+            subprocess.run([sys.executable, '-c', conv_script, html_path, pdf_path],
                            check=True, capture_output=True, timeout=120)
             if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 100:
                 print(f"{Colors.OKGREEN}[+] PDF: {pdf_path} (xhtml2pdf){Colors.ENDC}")
