@@ -1,0 +1,114 @@
+{
+  "schema": 1,
+  "name": "secretpulse-core",
+  "description": "Labeled JavaScript, environment, configuration, notebook, source-map, and clean-noise fixtures scanned through the production detection pipeline.",
+  "cases": [
+    {
+      "id": "js-checkout-bundle",
+      "kind": "file",
+      "path": "frontend/checkout.js",
+      "labels": [
+        {"types": ["Stripe API Key"], "line": 3, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Stripe Publishable Key"], "line": 4, "category": "public_identifier", "severity": "LOW"},
+        {"types": ["Sentry DSN"], "line": 5, "category": "public_identifier", "severity": "LOW"},
+        {"types": ["GitHub Token"], "line": 6, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Slack Token"], "line": 7, "category": "secret", "severity": "HIGH"}
+      ]
+    },
+    {
+      "id": "js-minified-bundle",
+      "kind": "file",
+      "path": "frontend/analytics.min.js",
+      "labels": [
+        {"types": ["AWS Access Key"], "line": 1, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["SendGrid API Key"], "line": 1, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Mapbox Token"], "line": 1, "category": "public_identifier", "severity": "LOW"}
+      ]
+    },
+    {
+      "id": "env-production",
+      "kind": "file",
+      "path": "config/.env",
+      "labels": [
+        {"types": ["Database Connection String"], "line": 2, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["AWS Access Key"], "line": 3, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["AWS Secret Access Key"], "line": 4, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["OpenAI API Key"], "line": 5, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Stripe Publishable Key"], "line": 6, "category": "public_identifier", "severity": "LOW"}
+      ]
+    },
+    {
+      "id": "python-settings",
+      "kind": "file",
+      "path": "config/settings.py",
+      "labels": [
+        {"types": ["GitHub Token"], "line": 4, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Twilio Credentials"], "line": 5, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Square Access Token"], "line": 6, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Supabase Secret Key"], "line": 7, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["JWT Token"], "line": 9, "category": "secret", "severity": "HIGH"},
+        {"types": ["Slack Webhook"], "line": 10, "category": "secret", "severity": "HIGH"}
+      ]
+    },
+    {
+      "id": "private-key-pem",
+      "kind": "file",
+      "path": "config/deploy_key.pem",
+      "labels": [
+        {"types": ["Private Key"], "line": 1, "category": "secret", "severity": "CRITICAL"}
+      ]
+    },
+    {
+      "id": "js-base64-encoded-secret",
+      "kind": "file",
+      "path": "frontend/encoded-payload.js",
+      "labels": [
+        {"types": ["Base64-Encoded Secret"], "line": 2, "category": "secret", "severity": "HIGH"}
+      ]
+    },
+    {
+      "id": "notebook-cell-and-output",
+      "kind": "notebook",
+      "path": "notebooks/client.ipynb",
+      "labels": [
+        {"types": ["GitHub Token"], "source": "[cell 2 code]", "line": 2, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Hardcoded Password"], "source": "[cell 2 code]", "line": 3, "category": "secret", "severity": "HIGH"},
+        {"types": ["Slack Token"], "source": "[cell 2 output 1]", "line": 2, "category": "secret", "severity": "HIGH"}
+      ]
+    },
+    {
+      "id": "source-map-original-sources",
+      "kind": "sourcemap",
+      "path": "sourcemaps/app.js.map",
+      "labels": [
+        {"types": ["GitHub Token"], "source": "webpack://checkout/src/api.ts", "line": 2, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Mapbox Secret Token"], "source": "webpack://checkout/src/config.ts", "line": 1, "category": "secret", "severity": "CRITICAL"},
+        {"types": ["Google API Key"], "source": "webpack://checkout/src/config.ts", "line": 2, "category": "public_identifier", "severity": "LOW"}
+      ]
+    },
+    {
+      "id": "clean-vendor-bundle",
+      "kind": "file",
+      "path": "clean/vendor.bundle.js",
+      "labels": []
+    },
+    {
+      "id": "clean-package-lock",
+      "kind": "file",
+      "path": "clean/package-lock.json",
+      "labels": []
+    },
+    {
+      "id": "clean-public-config",
+      "kind": "file",
+      "path": "clean/public.config.js",
+      "labels": []
+    },
+    {
+      "id": "clean-documentation-placeholders",
+      "kind": "file",
+      "path": "clean/onboarding.md",
+      "labels": []
+    }
+  ]
+}

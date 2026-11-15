@@ -1,5 +1,69 @@
 # Changelog
 
+## v5.6.0 (2026-11-15)
+### Signal Quality
+- Added explicit public-identifier classification for 14 browser and ingestion identifiers, including Stripe publishable keys, Mapbox public tokens, Google/Firebase client keys, Sentry DSNs, Datadog RUM tokens, analytics project IDs, and auth/widget client IDs
+- Public identifiers are emitted as LOW `lead` inventory with a reason and per-type verification policy; they cannot escalate to CRITICAL, be reported as verified credentials, or fail a CI gate
+- Split mixed provider rules so secret and public forms cannot collide: Stripe secret vs publishable, Mapbox secret vs public, Intercom access token vs app ID, HubSpot API key vs portal ID
+- Credential totals, public-identifier totals, and raw candidate counts are reported separately in the console summary and JSON
+- Exact-format high-impact credentials now keep their declared severity (for example, `sk_live_` stays CRITICAL at 82 confidence); confidence still controls risk ordering, and the pin reason is recorded in evidence
+
+### Evidence Depth
+- Every secret and public-identifier finding now carries an exact line number and a bounded context snippet
+- Unified findings include a copy-ready reproduction command: `sed` for local files, `curl | sed` for URL findings with a line, and `grep` as a fallback
+- HTML reports show source line references, escaped snippets, and public-by-design notes
+- SARIF exports line regions, masked snippets, CWE/OWASP metadata, remediation, and stable fingerprints
+- Exact secret values are masked in SARIF snippets and reproduction text
+
+### Verification Safety
+- Active verification is GET-only and now supports provider allowlists with `--verify-providers`
+- Slack webhook verification is disabled by default and requires `--allow-webhook-checks` because delivery has side effects
+- Public identifiers skip or scope verification according to provider policy
+- Verification details are redacted before they reach output or JSON
+
+### Request Safety and Authenticated Scanning
+- Added `--config`, `--header`, `--cookie`, `--proxy`, `--timeout`, `--max-response-kb`, `--verify-providers`, and `--allow-webhook-checks`
+- JSON and TOML config support `[http]` and `[verify]` sections with CLI precedence and validation
+- Redirects are followed manually up to 5 hops with scope checks on every hop; out-of-scope redirects are blocked and counted
+- Response bodies are streamed and capped before parsing, with truncation tracked in scan stats
+- Worker threads use isolated `requests.Session` objects sharing the configured headers, cookies, proxy, retry strategy, and TLS settings
+- Authenticated scans apply headers and cookies to all target HTTP paths, including sensitive-file probes
+
+### Detection Quality Benchmark
+- Added a labeled corpus and benchmark runner that exercises the production pipeline: regex detection, decoded-secret prepass, false-positive filtering, confidence scoring, and source-map extraction
+- Reports micro-averaged precision, recall, F1, line accuracy, category accuracy, severity accuracy, per-type recall, and clean-noise cases
+- Supports JSON and Markdown artifacts, configurable quality thresholds, and baseline regression comparison for CI
+- Manifest validation rejects path traversal, duplicate case IDs, invalid categories/severities, and unknown detection types before any fixture is scanned
+- Built-in corpus covers 12 realistic cases and 27 labeled findings across JavaScript, minified bundles, `.env`, Python settings, PEM keys, base64 payloads, Jupyter notebooks, webpack source maps, lockfiles, vendor code, and documentation placeholders
+- Refactored source-map extraction into a reusable `scan_sourcemap_data()` path used by both live harvesting and the benchmark
+
+### Staged, Notebook, and Signing-Secret Coverage
+- Added `--staged [REPO]`, which reads staged blobs from the git index rather than the working tree; deleted files, binaries, and oversized blobs are skipped
+- Added cell-aware Jupyter notebook scanning for cell sources, stream output, tracebacks, and text/HTML/Markdown/JSON display data; malformed notebooks fall back to raw text scanning
+- Added signing material detection for `JWT_SECRET`, `SESSION_SECRET`, `CSRF_SECRET`, `SIGNING_KEY`, `ENCRYPTION_KEY`, `HMAC_SECRET`, `APP_SECRET`, and related assignments, with placeholder and entropy filtering
+- Benchmark corpus expanded to 12 cases and 27 findings with a notebook cell/output case and a low-entropy signing-secret hard negative
+- Added a pre-commit hook example that scans exactly what is about to be committed
+- Added GitHub Actions CI for bundle freshness, compilation, the full test suite, and strict benchmark thresholds
+
+### Security Fixes
+- Console finding details now mask secret values instead of printing the full credential; JSON/SARIF evidence masking behavior is unchanged
+
+### Bug Fixes Found by the Benchmark
+- Fixed Mapbox public and secret token patterns to accept base64url characters (`-` and `_`), which previously missed valid tokens
+- Exact-format and locally validated high-impact credentials now keep their declared severity instead of being downgraded by confidence; this covers PEM private keys, database connection strings, Twilio credentials, and signature-confirmed base64 secrets
+- PEM private-key findings now validate the header regardless of whether the full key body was captured
+
+### Modular Source Layout
+- Moved the 12,000+ line monolith into 14 focused modules under `secretpulse/` while preserving the standalone `python3 SecretPulse.py` distribution
+- Added `build_secretpulse.py` to bundle the modular source deterministically into `SecretPulse.py`, with `--check` for CI staleness detection
+- Added `python3 -m secretpulse` as an equivalent package entrypoint
+- Added layout tests that verify the bundle is current, standalone, and exports the core scanner components
+
+### Output Schema
+- `findings` and `unified_findings` are now identical in JSON; raw detection records are labeled `secret_candidates`
+- JSON includes a non-secret `scan_config` summary and separate `secrets_total`, `public_identifiers_total`, and `secret_candidates_total`
+- Test suite expanded from 14 to 50 tests, adding public-identifier behavior, exact-format severity pinning, verifier safety, real HTTP response caps and redirects, concurrent session isolation, config validation, SARIF redaction, benchmark scoring, corpus validation, source-map extraction, benchmark artifact redaction, regression detection, modular bundle consistency, staged-index scanning, notebook cell/output scanning, CLI gate redaction, and signing-secret detection
+
 ## v5.5.0 (2026-11-14)
 ### New Exposure Coverage
 - Added validated sensitive-file discovery for Git, Mercurial, and SVN metadata; `.DS_Store`; SSH private keys; SQL and ZIP backups; PHP config backups; IIS/app settings; Spring Actuator; Apache server-status; phpinfo; Terraform state; and Docker Compose

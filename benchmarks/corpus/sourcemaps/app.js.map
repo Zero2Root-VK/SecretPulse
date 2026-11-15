@@ -1,0 +1,15 @@
+{
+  "version": 3,
+  "file": "app.js",
+  "sourceRoot": "",
+  "sources": [
+    "webpack://checkout/src/api.ts",
+    "webpack://checkout/src/config.ts"
+  ],
+  "sourcesContent": [
+    "import axios from \"axios\";\nconst GITHUB_TOKEN = \"ghp_QEJUEhFy3lRmyMdu0ZlnMHM1DjbrGpgOMour\";\nexport async function sync() {\n  return axios.post(\"/api/sync\", {}, { headers: { Authorization: GITHUB_TOKEN } });\n}\n",
+    "export const MAPBOX_SECRET = \"sk.eyJ3Reqgq89E7JBxZF3bKgI-w-fh0HevINCkS3Mr8hTpxXdF6qCrz0TskHFkXdsqAj7D5-HQd68g0KRLcyvyFOnFd\";\nexport const GOOGLE_KEY = \"AIzamcSRT2Cgoz5gs8Q2QlqN6zkf3T42UinJZ0g\";\nexport const REGION = \"eu-west-1\";\n"
+  ],
+  "names": [],
+  "mappings": ""
+}

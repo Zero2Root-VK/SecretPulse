@@ -10,6 +10,9 @@ build_pro.py
 build_free.py
 build_both.py
 
+# Benchmark corpus fixtures (generated artifacts remain ignored)
+!benchmarks/corpus/**/*.json
+
 # Python
 __pycache__/
 *.pyc
